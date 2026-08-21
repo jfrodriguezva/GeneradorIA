@@ -1,0 +1,36 @@
+namespace Generativa.Api.Models;
+
+public class GenerateImageRequest
+{
+    public string Prompt { get; set; } = string.Empty;
+    public string? NegativePrompt { get; set; }
+    public int Steps { get; set; } = 30;
+    public double GuidanceScale { get; set; } = 7.0;
+    public int Width { get; set; } = 512;
+    public int Height { get; set; } = 768;
+    public int? Seed { get; set; }
+    public bool Upscale { get; set; } = false;
+}
+
+public class EditImageRequest
+{
+    public string ImageBase64 { get; set; } = string.Empty;
+    public string Prompt { get; set; } = string.Empty;
+    public string? NegativePrompt { get; set; }
+    public double Strength { get; set; } = 0.6;
+    public int Steps { get; set; } = 30;
+    public double GuidanceScale { get; set; } = 7.0;
+    public int? Seed { get; set; }
+    public bool Upscale { get; set; } = false;
+}
+
+public class FaceSwapRequest
+{
+    public string SourceImageBase64 { get; set; } = string.Empty;
+    public string TargetImageBase64 { get; set; } = string.Empty;
+}
+
+public class UpscaleRequest
+{
+    public string ImageBase64 { get; set; } = string.Empty;
+}

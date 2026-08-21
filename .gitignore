@@ -1,0 +1,32 @@
+# Python
+worker-python/.venv/
+worker-python/.venv-image/
+worker-python/**/__pycache__/
+worker-python/models/*.gguf
+worker-python/image/ov-models/
+worker-python/faceswap-models/
+worker-python/upscale-models/*.pb
+worker-python/upscale-models/*.onnx
+
+# .NET
+api-csharp/**/bin/
+api-csharp/**/obj/
+api-csharp/**/publish/
+host-wpf/**/bin/
+host-wpf/**/obj/
+host-wpf/**/publish/
+
+# Next.js
+frontend-nextjs/.next/
+frontend-nextjs/node_modules/
+frontend-nextjs/out/
+
+# Instalador (binarios grandes, se regeneran con ISCC)
+installer/output/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Estado local de Claude Code (no es parte del proyecto)
+.claude/

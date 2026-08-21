@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+
+# llama-cpp-python se instala aparte (no vía este archivo) con:
+#   pip install llama-cpp-python --prefer-binary --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# porque el paquete de PyPI intenta compilar desde código fuente con MSVC y falla; el índice
+# de wheels precompiladas de CPU evita eso. Ver installer/setup-environment.ps1.

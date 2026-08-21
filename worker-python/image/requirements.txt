@@ -1,0 +1,25 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pillow==10.4.0
+optimum[openvino]==1.24.0
+diffusers==0.30.3
+transformers==4.44.2
+
+# En redes corporativas con inspección TLS (MITM), requests/urllib3 (certifi) no confían
+# en el certificado raíz corporativo aunque Windows sí. Esto lo arregla:
+pip-system-certs
+
+# Pines para evitar el conflicto de versiones entre optimum-intel/openvino/nncf:
+# openvino>=2026.0 eliminó `openvino.runtime`, que optimum-intel 1.22.0 todavía usa.
+# nncf>=3.x asume tipos (Type.u2) que no existen antes de openvino 2026.
+# Instalar torch por separado con: pip install torch --index-url https://download.pytorch.org/whl/cpu
+openvino<2026
+nncf==2.14.1
+
+# Face-swap (InsightFace + inswapper) y escalado a Full HD (OpenCV dnn_superres).
+# Ojo: opencv-contrib-python-headless reemplaza a opencv-python-headless (no deben
+# coexistir ambos, dnn_superres solo viene en el paquete "contrib").
+insightface
+onnxruntime
+opencv-contrib-python-headless
