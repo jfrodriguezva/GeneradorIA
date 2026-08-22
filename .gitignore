@@ -30,3 +30,6 @@ Thumbs.db
 
 # Estado local de Claude Code (no es parte del proyecto)
 .claude/
+
+# Acceso directo local (rutas absolutas de la maquina)
+Generativa.lnk

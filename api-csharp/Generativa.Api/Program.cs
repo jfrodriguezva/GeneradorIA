@@ -22,7 +22,7 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("LocalFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:20001", "http://127.0.0.1:20001")
+        policy.WithOrigins("http://localhost:20000", "http://127.0.0.1:20000")
               .AllowAnyHeader()
               .AllowAnyMethod();
     });

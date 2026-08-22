@@ -27,4 +27,4 @@ Start-Process powershell -ArgumentList @(
   "cd '$root\frontend-nextjs'; npm run dev"
 )
 
-Write-Host "Servicios lanzados: worker chat (8011), worker imagenes (8002), API C# (20000), frontend Next.js (20001)."
+Write-Host "Servicios lanzados: worker chat (8011), worker imagenes (8002), API C# (20001), frontend Next.js (20000)."

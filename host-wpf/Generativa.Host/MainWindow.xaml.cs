@@ -6,7 +6,7 @@ namespace Generativa.Host;
 
 public partial class MainWindow : Window
 {
-    private const string FrontendUrl = "http://127.0.0.1:20001";
+    private const string FrontendUrl = "http://127.0.0.1:20000";
 
     private readonly ObservableCollection<string> _statusLines = [];
     private ServiceOrchestrator? _orchestrator;

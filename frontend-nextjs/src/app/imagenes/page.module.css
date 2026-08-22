@@ -7,7 +7,8 @@
   --accent: #5b8def;
 
   display: flex;
-  min-height: 100vh;
+  flex: 1;
+  min-height: 0;
   justify-content: center;
   font-family: var(--font-geist-sans);
   background-color: var(--background);
@@ -15,6 +16,8 @@
 }
 
 .main {
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   width: 100%;

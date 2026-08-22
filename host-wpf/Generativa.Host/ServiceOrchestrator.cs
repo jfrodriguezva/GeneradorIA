@@ -66,12 +66,12 @@ public class ServiceOrchestrator
 
         yield return new ManagedService(
             "API",
-            "http://127.0.0.1:20000/health",
+            "http://127.0.0.1:20001/health",
             _ => BuildApiStartInfo());
 
         yield return new ManagedService(
             "Frontend",
-            "http://127.0.0.1:20001/",
+            "http://127.0.0.1:20000/",
             _ => BuildFrontendStartInfo());
     }
 
@@ -87,7 +87,7 @@ public class ServiceOrchestrator
             {
                 FileName = installedExe,
                 WorkingDirectory = Path.GetDirectoryName(installedExe)!,
-                Environment = { ["ASPNETCORE_URLS"] = "http://127.0.0.1:20000" },
+                Environment = { ["ASPNETCORE_URLS"] = "http://127.0.0.1:20001" },
             };
         }
 
@@ -99,7 +99,7 @@ public class ServiceOrchestrator
             {
                 FileName = publishedExe,
                 WorkingDirectory = Path.GetDirectoryName(publishedExe)!,
-                Environment = { ["ASPNETCORE_URLS"] = "http://127.0.0.1:20000" },
+                Environment = { ["ASPNETCORE_URLS"] = "http://127.0.0.1:20001" },
             };
         }
 
@@ -111,7 +111,7 @@ public class ServiceOrchestrator
                 FileName = "dotnet",
                 Arguments = $"\"{debugDll}\"",
                 WorkingDirectory = apiProjectDir,
-                Environment = { ["ASPNETCORE_URLS"] = "http://127.0.0.1:20000" },
+                Environment = { ["ASPNETCORE_URLS"] = "http://127.0.0.1:20001" },
             };
         }
 
@@ -132,7 +132,9 @@ public class ServiceOrchestrator
     private ProcessStartInfo BuildFrontendStartInfo()
     {
         var frontendDir = Path.Combine(_root, "frontend-nextjs");
-        var hasProdBuild = Directory.Exists(Path.Combine(frontendDir, ".next"));
+        // BUILD_ID solo existe tras `next build`: la carpeta .next tambien la crea `next dev`,
+        // asi que mirar solo la carpeta hacia lanzar `next start` sin build de produccion.
+        var hasProdBuild = File.Exists(Path.Combine(frontendDir, ".next", "BUILD_ID"));
 
         // Si Node.js se acaba de instalar (ej. durante el setup del instalador), es posible
         // que "npm.cmd" todavía no esté resuelto en el PATH de este proceso. Se prueba PATH

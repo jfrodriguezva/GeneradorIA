@@ -9,13 +9,13 @@ hardware **sin GPU dedicada** (CPU-only vía OpenVINO). Uso personal, consentido
 
 ```
 WPF Host (Generativa.Host.exe)
-  └─ WebView2 → apunta a http://127.0.0.1:20001 (frontend)
+  └─ WebView2 → apunta a http://127.0.0.1:20000 (frontend)
   └─ Lanza y vigila los 4 procesos de abajo (ver ServiceOrchestrator.cs)
 
-Next.js frontend (puerto 20001)
+Next.js frontend (puerto 20000)
   └─ fetch() → API C#
 
-API C# / ASP.NET Core (puerto 20000)
+API C# / ASP.NET Core (puerto 20001)
   └─ proxy HTTP → workers Python (no tiene lógica de IA propia)
 
 Worker chat Python (puerto 8011) — worker-python/chat/main.py
@@ -45,8 +45,8 @@ Levanta los 4 servicios en ventanas separadas. Luego, aparte: `cd host-wpf/Gener
 
 | Servicio | Puerto | Nota |
 |---|---|---|
-| API C# | 20000 | |
-| Frontend Next.js | 20001 | |
+| API C# | 20001 | |
+| Frontend Next.js | 20000 | |
 | Worker chat | 8011 | **No usar 8001** — choca con otro proyecto del usuario (`SportsPredictor ML Service`) que corre en esta máquina de desarrollo. Si migras a otra máquina sin ese conflicto, puedes usar el puerto que quieras, pero mantén consistencia en todos los archivos. |
 | Worker imágenes | 8002 | |
 
