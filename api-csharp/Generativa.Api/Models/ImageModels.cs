@@ -4,12 +4,12 @@ public class GenerateImageRequest
 {
     public string Prompt { get; set; } = string.Empty;
     public string? NegativePrompt { get; set; }
-    public int Steps { get; set; } = 30;
-    public double GuidanceScale { get; set; } = 7.0;
+    public int Steps { get; set; } = 50;
+    public double GuidanceScale { get; set; } = 7.5;
     public int Width { get; set; } = 512;
     public int Height { get; set; } = 768;
     public int? Seed { get; set; }
-    public bool Upscale { get; set; } = false;
+    public bool Upscale { get; set; } = true;
 }
 
 public class EditImageRequest
@@ -18,10 +18,10 @@ public class EditImageRequest
     public string Prompt { get; set; } = string.Empty;
     public string? NegativePrompt { get; set; }
     public double Strength { get; set; } = 0.6;
-    public int Steps { get; set; } = 30;
-    public double GuidanceScale { get; set; } = 7.0;
+    public int Steps { get; set; } = 50;
+    public double GuidanceScale { get; set; } = 7.5;
     public int? Seed { get; set; }
-    public bool Upscale { get; set; } = false;
+    public bool Upscale { get; set; } = true;
 }
 
 public class FaceSwapRequest

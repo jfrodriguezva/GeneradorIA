@@ -8,6 +8,15 @@ const API_BASE_URL =
 
 type Mode = "generate" | "edit" | "faceswap";
 
+const FRAMING_PRESETS = {
+  retrato: { label: "Retrato", width: 512, height: 768 },
+  cuerpoCompleto: { label: "Cuerpo completo", width: 512, height: 896 },
+  cuadrado: { label: "Cuadrado", width: 768, height: 768 },
+  horizontal: { label: "Horizontal / paisaje", width: 896, height: 512 },
+} as const;
+
+type FramingKey = keyof typeof FRAMING_PRESETS;
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -27,6 +36,7 @@ export default function ImagenesPage() {
   // Generar desde texto
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
+  const [framing, setFraming] = useState<FramingKey>("retrato");
 
   // Editar foto existente
   const [sourceFile, setSourceFile] = useState<File | null>(null);
@@ -40,7 +50,7 @@ export default function ImagenesPage() {
   const [faceTargetFile, setFaceTargetFile] = useState<File | null>(null);
   const [faceTargetPreviewUrl, setFaceTargetPreviewUrl] = useState<string | null>(null);
 
-  const [upscale, setUpscale] = useState(false);
+  const [upscale, setUpscale] = useState(true);
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -82,10 +92,10 @@ export default function ImagenesPage() {
         body: JSON.stringify({
           prompt: trimmed,
           negativePrompt: negativePrompt.trim() || null,
-          steps: 30,
-          guidanceScale: 7.0,
-          width: 512,
-          height: 768,
+          steps: 50,
+          guidanceScale: 7.5,
+          width: FRAMING_PRESETS[framing].width,
+          height: FRAMING_PRESETS[framing].height,
           upscale,
         }),
       });
@@ -124,8 +134,8 @@ export default function ImagenesPage() {
           imageBase64,
           prompt: trimmed,
           strength,
-          steps: 30,
-          guidanceScale: 7.0,
+          steps: 50,
+          guidanceScale: 7.5,
           upscale,
         }),
       });
@@ -257,9 +267,27 @@ export default function ImagenesPage() {
               />
             </label>
 
+            <label className={styles.label}>
+              Encuadre
+              <select
+                className={styles.input}
+                value={framing}
+                onChange={(e) => setFraming(e.target.value as FramingKey)}
+              >
+                {Object.entries(FRAMING_PRESETS).map(([key, preset]) => (
+                  <option key={key} value={key}>
+                    {preset.label} ({preset.width}×{preset.height})
+                  </option>
+                ))}
+              </select>
+              <span className={styles.hint}>
+                Para cuerpo completo, describe en el prompt que quieres ver a la persona de pies a cabeza.
+              </span>
+            </label>
+
             <label className={styles.checkboxLabel}>
               <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
-              Escalar a Full HD (más lento)
+              Escalar a Full HD
             </label>
 
             <button
@@ -267,7 +295,7 @@ export default function ImagenesPage() {
               onClick={generate}
               disabled={isGenerating || !prompt.trim()}
             >
-              {isGenerating ? "Generando… (alta calidad, puede tardar varios minutos en CPU)" : "Generar imagen"}
+              {isGenerating ? "Generando a máxima calidad… (~15-20 min en CPU)" : "Generar imagen (máxima calidad)"}
             </button>
           </div>
         )}
@@ -312,7 +340,7 @@ export default function ImagenesPage() {
 
             <label className={styles.checkboxLabel}>
               <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
-              Escalar a Full HD (más lento)
+              Escalar a Full HD
             </label>
 
             <button
@@ -320,7 +348,7 @@ export default function ImagenesPage() {
               onClick={editPhoto}
               disabled={isGenerating || !editPrompt.trim() || !sourceFile}
             >
-              {isGenerating ? "Editando… (puede tardar varios minutos en CPU)" : "Editar imagen"}
+              {isGenerating ? "Editando a máxima calidad… (~15-20 min en CPU)" : "Editar imagen (máxima calidad)"}
             </button>
           </div>
         )}

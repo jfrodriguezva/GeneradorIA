@@ -86,21 +86,34 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Generativa Image Worker", lifespan=lifespan)
 
 
+# Reforzado tras pruebas: además de anatomía/calidad, evita que se cuele el look
+# "amateur/foto de celular" o que derive a ilustración/render en vez de fotografía.
 DEFAULT_NEGATIVE_PROMPT = (
     "blurry, low quality, low resolution, deformed, disfigured, bad anatomy, "
-    "extra limbs, extra fingers, mutated hands, watermark, text, jpeg artifacts"
+    "extra limbs, extra fingers, missing fingers, fused fingers, too many fingers, "
+    "malformed hands, mutated hands, poorly drawn hands, watermark, text, jpeg artifacts, "
+    "amateur, snapshot, phone photo, harsh flash, grainy, noisy, out of focus, "
+    "flat lighting, underexposed, overexposed, illustration, painting, cartoon, "
+    "3d render, cgi, anime, duplicate"
+)
+
+# Se añade automáticamente al final de cualquier prompt para subir el nivel base de
+# calidad ("máxima calidad posible" sin que el usuario tenga que escribirlo cada vez).
+QUALITY_SUFFIX = (
+    ", professional photography, ultra detailed, sharp focus, high quality, "
+    "8k uhd, natural lighting"
 )
 
 
 class GenerateRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = None
-    steps: int = 30
-    guidance_scale: float = 7.0
+    steps: int = 50
+    guidance_scale: float = 7.5
     width: int = 512
     height: int = 768
     seed: Optional[int] = None
-    upscale: bool = False
+    upscale: bool = True
 
 
 class EditRequest(BaseModel):
@@ -108,10 +121,10 @@ class EditRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = None
     strength: float = 0.6
-    steps: int = 30
-    guidance_scale: float = 7.0
+    steps: int = 50
+    guidance_scale: float = 7.5
     seed: Optional[int] = None
-    upscale: bool = False
+    upscale: bool = True
 
 
 @app.get("/health")
@@ -131,7 +144,7 @@ def generate(req: GenerateRequest):
         generator = np.random.RandomState(req.seed)
 
     result = _pipe(
-        prompt=req.prompt,
+        prompt=req.prompt + QUALITY_SUFFIX,
         negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
         num_inference_steps=req.steps,
         guidance_scale=req.guidance_scale,
@@ -175,7 +188,7 @@ def edit(req: EditRequest):
         generator = np.random.RandomState(req.seed)
 
     result = _img2img_pipe(
-        prompt=req.prompt,
+        prompt=req.prompt + QUALITY_SUFFIX,
         negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
         image=input_image,
         strength=req.strength,
