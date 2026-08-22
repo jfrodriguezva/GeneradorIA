@@ -136,36 +136,35 @@ public class ServiceOrchestrator
         // asi que mirar solo la carpeta hacia lanzar `next start` sin build de produccion.
         var hasProdBuild = File.Exists(Path.Combine(frontendDir, ".next", "BUILD_ID"));
 
-        // Si Node.js se acaba de instalar (ej. durante el setup del instalador), es posible
-        // que "npm.cmd" todavía no esté resuelto en el PATH de este proceso. Se prueba PATH
-        // primero y, si no aparece, se cae a las rutas de instalación por defecto de Node.
-        var npmCmd = "npm.cmd";
-        if (!IsOnPath(npmCmd))
-        {
-            var found = KnownNodeInstallDirs
-                .Select(dir => Path.Combine(dir, "npm.cmd"))
-                .FirstOrDefault(File.Exists);
-            if (found is not null)
-            {
-                npmCmd = found;
-            }
-        }
+        // npm.cmd es un batch: si se lanza como proceso directo resuelve sus rutas internas
+        // contra el directorio de trabajo y busca npm-prefix.js dentro del proyecto (falla con
+        // MODULE_NOT_FOUND). Va por cmd /c call y con la ruta completa, nunca por nombre suelto.
+        var npmCmd = ResolveNpmCmd();
 
         return new ProcessStartInfo
         {
-            FileName = npmCmd,
-            Arguments = hasProdBuild ? "run start" : "run dev",
+            FileName = "cmd.exe",
+            Arguments = $"/c call \"{npmCmd}\" run {(hasProdBuild ? "start" : "dev")}",
             WorkingDirectory = frontendDir,
         };
     }
 
-    private static bool IsOnPath(string fileName)
+    /// <summary>
+    /// Ruta completa de npm.cmd. Si Node.js se acaba de instalar (ej. durante el setup del
+    /// instalador) puede no estar todavía en el PATH de este proceso, así que se cae a las
+    /// rutas de instalación por defecto.
+    /// </summary>
+    private static string ResolveNpmCmd()
     {
         var pathVar = Environment.GetEnvironmentVariable("PATH") ?? "";
-        return pathVar.Split(Path.PathSeparator)
+        var fromPath = pathVar.Split(Path.PathSeparator)
             .Where(dir => dir.Length > 0)
-            .Select(dir => Path.Combine(dir, fileName))
-            .Any(File.Exists);
+            .Select(dir => Path.Combine(dir, "npm.cmd"))
+            .FirstOrDefault(File.Exists);
+
+        return fromPath
+            ?? KnownNodeInstallDirs.Select(dir => Path.Combine(dir, "npm.cmd")).FirstOrDefault(File.Exists)
+            ?? "npm.cmd";
     }
 
     public async Task StartAllAsync(IProgress<string> progress, CancellationToken cancellationToken)
