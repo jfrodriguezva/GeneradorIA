@@ -12,7 +12,9 @@ Start-Process powershell -ArgumentList @(
 
 Start-Process powershell -ArgumentList @(
   "-NoExit", "-Command",
-  "cd '$root\worker-python'; .\.venv-image\Scripts\python.exe image\main.py"
+  # GPU = iGPU Intel vía OpenVINO. Medido en esta máquina (Core Ultra 5 135U): 6.8x más rápido
+  # que CPU a 50 pasos (867s -> 128s) sin pérdida de calidad observada. Ver docs/CAPACIDADES.md.
+  "cd '$root\worker-python'; `$env:GENERATIVA_IMAGE_DEVICE='GPU'; .\.venv-image\Scripts\python.exe image\main.py"
 )
 
 Start-Process powershell -ArgumentList @(
