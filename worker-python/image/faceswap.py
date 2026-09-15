@@ -23,11 +23,21 @@ MODEL_PATH = os.path.join(FACESWAP_MODELS_ROOT, "inswapper_128.onnx")
 
 _face_analyser = None
 _face_swapper = None
+_face_restorer = None
+
+GFPGAN_MODEL_PATH = os.environ.get(
+    "GENERATIVA_GFPGAN_MODEL_PATH",
+    os.path.join(FACESWAP_MODELS_ROOT, "GFPGANv1.4.pth"),
+)
 
 
 class FaceSwapRequest(BaseModel):
     source_image_base64: str  # foto de la persona cuyo rostro se va a usar
     target_image_base64: str  # foto donde se va a colocar ese rostro
+    # inswapper "pega" el rostro; esto lo re-renderiza para que la piel/luz/textura
+    # se mezclen con el resto de la foto en vez de notarse como un parche. Corre en
+    # CPU vía onnxruntime igual que el resto, tarda segundos no minutos.
+    restore_face: bool = True
 
 
 def _load_models():
@@ -55,6 +65,48 @@ def _load_models():
     _face_analyser = analyser
     _face_swapper = swapper
     print("[faceswap] Modelos listos")
+
+
+def _patch_basicsr_torchvision_compat():
+    """basicsr==1.4.2 (dependencia de gfpgan, sin releases desde 2022) importa
+    `torchvision.transforms.functional_tensor`, un módulo interno que torchvision quitó
+    en 0.17+ (su contenido se movió a `torchvision.transforms.functional`). Es el mismo
+    conflicto basicsr/torchvision por el que este proyecto ya había descartado
+    Real-ESRGAN (ver CLAUDE.md) — aquí, en vez de tener que fijar una versión vieja de
+    torchvision (que rompería el resto de dependencias que sí necesitan una reciente),
+    se restaura ese módulo como un alias antes de que basicsr lo importe.
+    """
+    import sys
+
+    if "torchvision.transforms.functional_tensor" in sys.modules:
+        return
+    import torchvision.transforms.functional as F
+
+    sys.modules["torchvision.transforms.functional_tensor"] = F
+
+
+def _load_restorer():
+    global _face_restorer
+    if _face_restorer is not None:
+        return _face_restorer
+
+    if not os.path.isfile(GFPGAN_MODEL_PATH):
+        print(f"[faceswap] GFPGAN no encontrado en {GFPGAN_MODEL_PATH}, se omite restauración facial.")
+        return None
+
+    _patch_basicsr_torchvision_compat()
+    from gfpgan import GFPGANer
+
+    print(f"[faceswap] Cargando GFPGAN desde {GFPGAN_MODEL_PATH}...")
+    _face_restorer = GFPGANer(
+        model_path=GFPGAN_MODEL_PATH,
+        upscale=1,  # el upscale a Full HD ya lo hace upscale.py después; aquí solo restaura.
+        arch="clean",
+        channel_multiplier=2,
+        bg_upsampler=None,
+    )
+    print("[faceswap] GFPGAN listo")
+    return _face_restorer
 
 
 def _decode_image(image_base64: str):
@@ -86,6 +138,15 @@ def swap_faces(req: FaceSwapRequest) -> dict:
     for target_face in target_faces:
         result_bgr = _face_swapper.get(result_bgr, target_face, source_face, paste_back=True)
 
+    restored = False
+    if req.restore_face:
+        restorer = _load_restorer()
+        if restorer is not None:
+            _, _, result_bgr = restorer.enhance(
+                result_bgr, has_aligned=False, only_center_face=False, paste_back=True
+            )
+            restored = True
+
     result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
     result_image = Image.fromarray(result_rgb)
 
@@ -93,4 +154,9 @@ def swap_faces(req: FaceSwapRequest) -> dict:
     result_image.save(buffer, format="PNG")
     image_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-    return {"image_base64": image_base64, "format": "png", "faces_swapped": len(target_faces)}
+    return {
+        "image_base64": image_base64,
+        "format": "png",
+        "faces_swapped": len(target_faces),
+        "restored": restored,
+    }

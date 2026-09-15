@@ -16,7 +16,10 @@ workers: 5 min para chat, 20 min para imágenes. `GET /health` a nivel de app (n
 | GET | `/api/image/health` | — | `GET {image}/health` | passthrough |
 | POST | `/api/image/generate` | `GenerateImageRequest{prompt, negativePrompt?, steps=50, guidanceScale=7.5, width=512, height=768, seed?, upscale=true}` | `POST {image}/generate` | |
 | POST | `/api/image/edit` | `EditImageRequest{imageBase64, prompt, negativePrompt?, strength=0.6, steps=50, guidanceScale=7.5, seed?, upscale=true}` | `POST {image}/edit` | |
-| POST | `/api/image/faceswap` | `FaceSwapRequest{sourceImageBase64, targetImageBase64}` | `POST {image}/faceswap` | |
+| POST | `/api/image/inpaint` | `InpaintRequest{imageBase64, prompt, negativePrompt?, maskBase64?, maskTarget?, strength=0.9, steps=50, guidanceScale=7.5, seed?, upscale=true}` | `POST {image}/inpaint` | requiere `maskBase64` o `maskTarget` |
+| POST | `/api/image/generate-controlled` | `ControlledGenerateRequest{referenceImageBase64, controlType="pose", prompt, negativePrompt?, controlnetConditioningScale=1.0, steps=50, guidanceScale=7.5, seed?, upscale=true}` | `POST {image}/generate-controlled` | |
+| POST | `/api/image/generate-with-reference` | `ReferenceGenerateRequest{referenceImageBase64, prompt, negativePrompt?, ipAdapterScale=0.6, steps=30, guidanceScale=7.5, width=512, height=768, seed?, upscale=true}` | `POST {image}/generate-with-reference` | |
+| POST | `/api/image/faceswap` | `FaceSwapRequest{sourceImageBase64, targetImageBase64, restoreFace=true}` | `POST {image}/faceswap` | |
 | POST | `/api/image/upscale` | `UpscaleRequest{imageBase64}` | `POST {image}/upscale` | |
 
 Todos los endpoints de imagen deserializan la respuesta del worker y la devuelven con el mismo
@@ -43,8 +46,29 @@ Config vía variables de entorno: `GENERATIVA_MODEL_PATH` (vacío = carga perezo
 - `POST /edit` — `EditRequest{image_base64, prompt, negative_prompt?, strength=0.6, steps=50,
   guidance_scale=7.5, seed?, upscale=true}` → misma forma de respuesta; la imagen de entrada se
   redimensiona al lado mayor 768px (redondeado a múltiplo de 8)
-- `POST /faceswap` — `{source_image_base64, target_image_base64}` → resultado del swap; 503 si
-  falta `inswapper_128.onnx` en `faceswap-models/`
+- `POST /inpaint` — `InpaintRequest{image_base64, prompt, negative_prompt?, mask_base64?,
+  mask_target?, strength=0.9, steps=50, guidance_scale=7.5, seed?, upscale=true}` → edita solo
+  la zona indicada dejando el resto de la imagen intacto. `mask_target` genera la máscara solo
+  (segmentación con SegFormer, `worker-python/image/segmentation.py`): `"ropa"`, `"fondo"`,
+  `"persona"` o `"rostro"`; alternativamente se puede pasar `mask_base64` ya dibujada a mano
+  (blanco = zona a editar). 400 si no se manda ninguna de las dos.
+- `POST /generate-controlled` — `ControlledGenerateRequest{reference_image_base64,
+  control_type="pose", prompt, negative_prompt?, controlnet_conditioning_scale=1.0, steps=50,
+  guidance_scale=7.5, seed?, upscale=true}` → genera una escena nueva conservando la pose
+  (`control_type="pose"`, vía OpenPose de `controlnet_aux`) o los contornos (`"edges"`, Canny)
+  de `reference_image_base64`. No conserva el rostro/identidad — para eso combinar con
+  `/faceswap` después. **Corre en torch CPU puro, no OpenVINO** (ver nota de internals).
+- `POST /generate-with-reference` — `ReferenceGenerateRequest{reference_image_base64, prompt,
+  negative_prompt?, ip_adapter_scale=0.6, steps=30, guidance_scale=7.5, width=512, height=768,
+  seed?, upscale=true}` → genera una escena nueva a partir del prompt manteniendo la identidad
+  de la persona en `reference_image_base64` (IP-Adapter, `h94/IP-Adapter`
+  `ip-adapter-full-face_sd15.bin`). Distinto de face-swap: aquí la escena se genera desde cero,
+  no se pega un rostro sobre una foto existente. **Corre en torch CPU puro, no OpenVINO.**
+- `POST /faceswap` — `FaceSwapRequest{source_image_base64, target_image_base64,
+  restore_face=true}` → resultado del swap; 503 si falta `inswapper_128.onnx` en
+  `faceswap-models/`. Con `restore_face=true` (default), re-renderiza el rostro con GFPGAN para
+  que se mezcle con la iluminación/textura de la foto; si falta `GFPGANv1.4.pth` en
+  `faceswap-models/`, se omite este paso sin dar error (`restored: false` en la respuesta).
 - `POST /upscale` — `{image_base64}` → FSRCNN x4 y luego recorte a lado mayor 1920px (el
   parámetro `target_long_side` no está expuesto vía API)
 
@@ -58,7 +82,14 @@ para el análisis completo de calidad.
 Config vía variables de entorno: `GENERATIVA_IMAGE_MODEL_ID` (default
 `SG161222/Realistic_Vision_V5.1_noVAE`), `GENERATIVA_IMAGE_OV_DIR`,
 `GENERATIVA_IMAGE_DEVICE=CPU` (también acepta `GPU`/`AUTO` si hay iGPU Intel),
-`GENERATIVA_UPSCALE_MODEL_PATH`.
+`GENERATIVA_UPSCALE_MODEL_PATH`, `GENERATIVA_GFPGAN_MODEL_PATH`.
+
+**`/generate`, `/edit`, `/inpaint` van por OpenVINO (acelerados); `/generate-controlled` y
+`/generate-with-reference` van por torch CPU puro** — optimum-intel 1.22.0 no tiene soporte
+estable de ControlNet ni IP-Adapter para SD1.5, solo para SD3/SDXL. Son notablemente más lentos
+que los otros tres endpoints en el mismo hardware. Si optimum-intel agrega ese soporte en el
+futuro, `_load_controlnet_pipeline`/`_load_ipadapter_pipeline` en `main.py` son el punto a
+migrar para recuperar la aceleración.
 
 ## Qué expone realmente el frontend
 

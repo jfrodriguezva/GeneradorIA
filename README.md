@@ -72,8 +72,12 @@ python -m venv .venv
 # Entorno de imágenes
 python -m venv .venv-image
 .\.venv-image\Scripts\python.exe -m pip install --upgrade pip
-.\.venv-image\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+.\.venv-image\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 .\.venv-image\Scripts\python.exe -m pip install -r image\requirements.txt
+# controlnet_aux trae opencv-python-headless, que no debe coexistir con
+# opencv-contrib-python-headless (dnn_superres, usado por el escalado, solo está en
+# "contrib") -- reinstala el correcto al final:
+.\.venv-image\Scripts\python.exe -m pip install --force-reinstall --no-deps opencv-contrib-python-headless
 ```
 
 > ⚠️ No uses `pip install llama-cpp-python` a secas ni te saltes el `--extra-index-url`: sin la
@@ -92,7 +96,12 @@ python -m venv .venv-image
   ese momento).
 - **Face-swap (`inswapper_128.onnx`)**: colócalo en `worker-python\faceswap-models\`. Sin este
   archivo, el face-swap devuelve error 503 pero el resto de funciones sigue funcionando.
+- **Restauración facial post face-swap (`GFPGANv1.4.pth`, opcional)**: colócalo también en
+  `worker-python\faceswap-models\`. Sin este archivo, el face-swap sigue funcionando igual, solo
+  que sin el paso de restauración (el rostro se nota más "pegado").
 - **Escalado (`FSRCNN_x4.pb`)**: colócalo en `worker-python\upscale-models\`.
+- **ControlNet, IP-Adapter, segmentación**: se descargan solos de Hugging Face la primera vez que
+  se usa cada función (igual que el modelo de imágenes), no requieren descarga manual.
 
 ### 3. Dependencias del frontend
 

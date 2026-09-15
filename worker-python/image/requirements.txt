@@ -23,3 +23,41 @@ nncf==2.14.1
 insightface
 onnxruntime
 opencv-contrib-python-headless
+
+# Restauración facial post face-swap (GFPGAN) para que el rostro intercambiado se
+# mezcle con la iluminación/textura de la foto en vez de notarse "pegado". Requiere
+# descargar aparte GFPGANv1.4.pth (ver GENERATIVA_GFPGAN_MODEL_PATH); si no está
+# presente, faceswap.py sigue funcionando y simplemente omite este paso.
+# OJO: basicsr==1.4.2 (sin releases desde 2022) importa un módulo interno de
+# torchvision que ya no existe en versiones nuevas (mismo conflicto por el que se
+# descartó Real-ESRGAN, ver más abajo) — faceswap.py lo parchea en tiempo de
+# ejecución (_patch_basicsr_torchvision_compat) antes de importar gfpgan, así que no
+# hace falta fijar una versión vieja de torchvision.
+gfpgan
+basicsr
+facexlib
+
+# Segmentación automática (ropa/persona/fondo/rostro) para generar máscaras de
+# inpainting sin que el usuario tenga que dibujarlas. Usa transformers (ya está arriba).
+
+# ControlNet (conservar pose/bordes al cambiar ropa o escenario). Corre en torch puro
+# (no OpenVINO, ver _load_controlnet_pipeline en main.py): optimum-intel 1.22.0 (la
+# versión que usa este proyecto) no expone ControlNet para SD1.5, solo para SD3/SDXL.
+# OJO: controlnet_aux declara opencv-python-headless como dependencia, que NO debe
+# coexistir con opencv-contrib-python-headless (lección #9 más abajo: dnn_superres
+# solo viene en "contrib"). Tras instalar este archivo, reinstalar el paquete correcto:
+#   pip install --force-reinstall --no-deps opencv-contrib-python-headless
+# (ya automatizado en installer/setup-environment.ps1).
+controlnet_aux
+
+# IP-Adapter (mantener la identidad de una persona en escenas nuevas). Este pipeline
+# corre en torch puro (no OpenVINO, ver _load_ipadapter_pipeline en main.py) porque
+# optimum-intel no tiene soporte estable de IP-Adapter para SD1.5 todavía.
+# Instalar torch y torchvision por separado con:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# (torchvision lo necesitan basicsr/gfpgan; si no se instala aquí con el índice CPU,
+# pip trae por defecto el build con CUDA — mismo problema que ya pasaba con torch solo).
+
+# Carga más rápida/liviana en memoria de los pipelines torch puro (ControlNet, IP-Adapter).
+# Sin esto siguen funcionando, solo más lento (diffusers lo pide explícitamente en el log).
+accelerate

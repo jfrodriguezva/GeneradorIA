@@ -65,6 +65,25 @@ Levanta los 4 servicios en ventanas separadas. Luego, aparte: `cd host-wpf/Gener
 - **Escalado a Full HD**: OpenCV `dnn_superres` con FSRCNN x4 (no Real-ESRGAN — ese paquete
   tiene conflictos conocidos de `basicsr`/`torchvision` con versiones nuevas de PyTorch).
   ~1-2 segundos por imagen, escala y luego recorta al lado largo en 1920px preservando aspecto.
+- **Segmentación (para inpainting dirigido)**: `mattmdjaga/segformer_b2_clothes` vía
+  `transformers` — separa ropa/persona/fondo/rostro para generar la máscara sola sin que el
+  usuario tenga que dibujarla. Ver `worker-python/image/segmentation.py`.
+- **Inpainting**: mismo checkpoint que `/generate`/`/edit` (Realistic Vision), vía
+  `OVStableDiffusionInpaintPipeline` (sí soportado en OpenVINO/optimum-intel para SD1.5, a
+  diferencia de ControlNet e IP-Adapter — ver más abajo). Al no ser un checkpoint
+  "inpainting-specific" corre en modo "legacy" (mezcla de latentes según la máscara).
+- **ControlNet** (conservar pose/bordes al cambiar ropa o escenario): `lllyasviel/control_v11p_sd15_openpose`
+  (pose, vía `controlnet_aux`) y `lllyasviel/control_v11p_sd15_canny` (bordes, solo OpenCV).
+  **No corre en OpenVINO**: `optimum-intel==1.22.0` no expone `OVStableDiffusionControlNetPipeline`
+  para SD1.5 (verificado en este entorno — solo existe para SD3/SDXL), así que
+  `_load_controlnet_pipeline` en `main.py` usa `diffusers` puro en torch CPU. Más lento que el
+  resto de endpoints; si optimum-intel agrega ese soporte, migrar para recuperar velocidad.
+- **IP-Adapter** (mantener la identidad de una persona en escenas nuevas): `h94/IP-Adapter`
+  (`ip-adapter-full-face_sd15.bin`). Mismo problema que ControlNet — sin soporte estable en
+  optimum-intel para SD1.5 — así que `_load_ipadapter_pipeline` también va por torch CPU puro.
+- **Restauración facial post face-swap**: GFPGAN (`GFPGANv1.4.pth`, descarga manual opcional en
+  `faceswap-models/`) para que el rostro intercambiado se mezcle con luz/textura en vez de
+  notarse "pegado". Corre en segundos vía onnxruntime/torch CPU, igual de rápido que el swap.
 
 ## Filtros de contenido
 
@@ -113,6 +132,25 @@ tiene GPU dedicada real.
    deben coexistir** — `dnn_superres` solo viene en el paquete "contrib".
 10. **Git Bash en Windows convierte flags que empiezan con `/`** (ej. `/VERYSILENT`) en rutas de
     archivo. Usar `MSYS_NO_PATHCONV=1` antes del comando, o doble slash (`//VERYSILENT`).
+11. **`basicsr` (dependencia de `gfpgan`) importa `torchvision.transforms.functional_tensor`**,
+    un módulo interno que torchvision quitó en 0.17+ (movido a `torchvision.transforms.functional`).
+    Es el mismo conflicto de la lección de Real-ESRGAN de arriba, pero esta vez GFPGAN sí hacía
+    falta (no hay alternativa igual de buena solo con OpenCV para restauración facial) — en vez
+    de fijar una versión vieja de torchvision, se parchea el módulo faltante en tiempo de
+    ejecución antes del import (`_patch_basicsr_torchvision_compat` en
+    `worker-python/image/faceswap.py`).
+12. **`controlnet_aux` (para ControlNet) declara `opencv-python-headless` como dependencia**,
+    que no debe coexistir con `opencv-contrib-python-headless` (misma lección #9). El orden de
+    resolución de `pip install -r requirements.txt` no garantiza cuál "gana" en disco — hay que
+    reinstalar el paquete correcto al final: `pip install --force-reinstall --no-deps
+    opencv-contrib-python-headless` (ya automatizado en `installer/setup-environment.ps1`).
+13. **`optimum-intel==1.22.0` no tiene soporte de ControlNet ni IP-Adapter para SD1.5 vía
+    OpenVINO** (`OVStableDiffusionControlNetPipeline`/`OVControlNetModel` no existen en esa
+    versión — verificado en este entorno; ese soporte solo está para SD3/SDXL). `/generate-controlled`
+    y `/generate-with-reference` corren en `diffusers` puro sobre torch CPU en vez de OpenVINO
+    por esto — son notablemente más lentos que `/generate`, `/edit` e `/inpaint`. Si una versión
+    futura de optimum-intel agrega ese soporte, migrar `_load_controlnet_pipeline`/
+    `_load_ipadapter_pipeline` en `main.py`.
 
 ## Instalador (`installer/`)
 
@@ -139,6 +177,17 @@ automática de Python/Node.js. Pide privilegios de administrador (UAC).
 - ✅ Chat, generación de imágenes, edición (img2img), face-swap, escalado a Full HD — todo
   funcionando y probado de punta a punta.
 - ✅ Instalador compilando con todos los modelos incluidos.
+- ✅ Inpainting dirigido (`/inpaint`, cambiar solo ropa/fondo/persona/rostro con máscara
+  automática por segmentación), ControlNet (`/generate-controlled`, conservar pose/bordes al
+  cambiar escena), IP-Adapter (`/generate-with-reference`, mantener identidad en escena nueva) y
+  restauración facial post face-swap (GFPGAN) — código escrito, sintaxis/imports verificados y
+  dependencias instaladas y probadas en el venv de desarrollo (incluye el parche
+  basicsr/torchvision y la reinstalación forzada de opencv-contrib, ver lecciones #11/#12).
+  **Pendiente de correr una generación real de punta a punta de cada endpoint nuevo** (cada
+  corrida en CPU tarda varios minutos, no se ejecutaron en esta sesión) y de descargar
+  `GFPGANv1.4.pth` para probar la restauración facial.
 - ⏳ Pendiente: validar el instalador en una máquina limpia distinta (el usuario lo va a probar
-  en una ThinkPad sin GPU dedicada).
+  en una ThinkPad sin GPU dedicada). Ahora también necesita validar que
+  `setup-environment.ps1` instale bien las dependencias nuevas (torchvision, gfpgan/basicsr,
+  controlnet_aux) en una máquina limpia.
 - ⬜ Video: descartado por hardware, pendiente para cuando haya una GPU NVIDIA disponible.

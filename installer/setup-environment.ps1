@@ -72,12 +72,23 @@ function New-WorkerVenv([string]$venvDir, [string]$requirementsFile, [switch]$Is
     & $venvPython -m pip install --upgrade pip --quiet
 
     if ($IsImageWorker) {
-        Write-Host "Instalando PyTorch (CPU-only)..."
-        & $venvPython -m pip install torch --index-url https://download.pytorch.org/whl/cpu --quiet
+        Write-Host "Instalando PyTorch + torchvision (CPU-only)..."
+        # torchvision lo necesitan basicsr/gfpgan (restauración facial) como dependencia
+        # transitiva; si no se instala aqui explicitamente con el indice CPU, pip trae
+        # por defecto el build con CUDA (varios GB de mas, igual que le pasaba a torch
+        # solo -- ver leccion aprendida #4 en CLAUDE.md).
+        & $venvPython -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --quiet
         Write-Host "Instalando pip-system-certs (compatibilidad con proxies corporativos)..."
         & $venvPython -m pip install pip-system-certs --quiet
         Write-Host "Instalando el resto de dependencias del worker de imagenes..."
         & $venvPython -m pip install -r $requirementsFile --quiet
+        # controlnet_aux declara opencv-python-headless como dependencia, que no debe
+        # coexistir con opencv-contrib-python-headless (leccion aprendida #9: dnn_superres,
+        # usado por el escalado a Full HD, solo viene en el paquete "contrib"). El orden de
+        # resolucion de pip no esta garantizado, asi que se reinstala el paquete correcto
+        # al final para asegurar que "gane" sobre el otro.
+        Write-Host "Asegurando opencv-contrib-python-headless (dnn_superres) tras las demas dependencias..."
+        & $venvPython -m pip install --force-reinstall --no-deps opencv-contrib-python-headless --quiet
     }
     else {
         Write-Host "Instalando llama-cpp-python (wheel precompilada CPU)..."
