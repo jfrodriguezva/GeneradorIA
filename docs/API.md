@@ -14,8 +14,8 @@ workers: 5 min para chat, 20 min para imágenes. `GET /health` a nivel de app (n
 | GET | `/api/chat/health` | — | `GET {chat}/health` | passthrough |
 | POST | `/api/chat` | `ChatRequest{messages:[{role,content}], stream=true, temperature=0.7, maxTokens=1024}` | `POST {chat}/chat` | si `stream`, reenvía SSE byte a byte; si no, JSON |
 | GET | `/api/image/health` | — | `GET {image}/health` | passthrough |
-| POST | `/api/image/generate` | `GenerateImageRequest{prompt, negativePrompt?, steps=50, guidanceScale=7.5, width=512, height=768, seed?, upscale=true}` | `POST {image}/generate` | |
-| POST | `/api/image/edit` | `EditImageRequest{imageBase64, prompt, negativePrompt?, strength=0.6, steps=50, guidanceScale=7.5, seed?, upscale=true}` | `POST {image}/edit` | |
+| POST | `/api/image/generate` | `GenerateImageRequest{prompt, negativePrompt?, steps=50, guidanceScale=7.5, width=512, height=768, seed?, upscale=true, hiresFix=false, restoreFaces=false}` | `POST {image}/generate` | |
+| POST | `/api/image/edit` | `EditImageRequest{imageBase64, prompt, negativePrompt?, strength=0.6, steps=50, guidanceScale=7.5, seed?, upscale=true, hiresFix=false, restoreFaces=false}` | `POST {image}/edit` | |
 | POST | `/api/image/inpaint` | `InpaintRequest{imageBase64, prompt, negativePrompt?, maskBase64?, maskTarget?, strength=0.9, steps=50, guidanceScale=7.5, seed?, upscale=true}` | `POST {image}/inpaint` | requiere `maskBase64` o `maskTarget` |
 | POST | `/api/image/generate-controlled` | `ControlledGenerateRequest{referenceImageBase64, controlType="pose", prompt, negativePrompt?, controlnetConditioningScale=1.0, steps=50, guidanceScale=7.5, seed?, upscale=true}` | `POST {image}/generate-controlled` | |
 | POST | `/api/image/generate-with-reference` | `ReferenceGenerateRequest{referenceImageBase64, prompt, negativePrompt?, ipAdapterScale=0.6, steps=30, guidanceScale=7.5, width=512, height=768, seed?, upscale=true}` | `POST {image}/generate-with-reference` | |
@@ -42,13 +42,21 @@ Config vía variables de entorno: `GENERATIVA_MODEL_PATH` (vacío = carga perezo
 
 - `GET /health` → `{status, model_loaded, device}`
 - `POST /generate` — `GenerateRequest{prompt, negative_prompt?, steps=50, guidance_scale=7.5,
-  width=512, height=768, seed?, upscale=true}` → `{image_base64, format:"png", width, height}`
+  width=512, height=768, seed?, upscale=true, hires_fix=false, restore_faces=false}` →
+  `{image_base64, format:"png", width, height}`. `hires_fix` corre una segunda pasada de
+  refinamiento (`_apply_hires_fix`: reescala 1.5x y reinyecta vía img2img con strength=0.4,
+  ~30-40% más lento). `restore_faces` pasa GFPGAN sobre el resultado (no solo en /faceswap);
+  requiere `GFPGANv1.4.pth`, si falta se ignora sin error.
 - `POST /edit` — `EditRequest{image_base64, prompt, negative_prompt?, strength=0.6, steps=50,
-  guidance_scale=7.5, seed?, upscale=true}` → misma forma de respuesta; la imagen de entrada se
-  redimensiona al lado mayor 768px (redondeado a múltiplo de 8)
+  guidance_scale=7.5, seed?, upscale=true, hires_fix=false, restore_faces=false}` → misma forma
+  de respuesta; la imagen de entrada se redimensiona al lado mayor 768px (redondeado a múltiplo
+  de 8); `hires_fix`/`restore_faces` igual que en `/generate`
 - `POST /inpaint` — `InpaintRequest{image_base64, prompt, negative_prompt?, mask_base64?,
-  mask_target?, strength=0.9, steps=50, guidance_scale=7.5, seed?, upscale=true}` → edita solo
-  la zona indicada dejando el resto de la imagen intacto. `mask_target` genera la máscara solo
+  mask_target?, strength=0.97, steps=50, guidance_scale=7.5, seed?, upscale=true}` → edita solo
+  la zona indicada dejando el resto de la imagen intacto (recorta la zona de la máscara con
+  margen, genera solo ahí a resolución completa del modelo y la pega de vuelta con blending —
+  `_run_inpaint_cropped` — para evitar el artefacto de "doble exposición" que daba correr el
+  inpainting sobre la imagen completa). `mask_target` genera la máscara solo
   (segmentación con SegFormer, `worker-python/image/segmentation.py`): `"ropa"`, `"fondo"`,
   `"persona"` o `"rostro"`; alternativamente se puede pasar `mask_base64` ya dibujada a mano
   (blanco = zona a editar). 400 si no se manda ninguna de las dos.

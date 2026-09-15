@@ -10,6 +10,8 @@ public class GenerateImageRequest
     public int Height { get; set; } = 768;
     public int? Seed { get; set; }
     public bool Upscale { get; set; } = true;
+    public bool HiresFix { get; set; } = false;
+    public bool RestoreFaces { get; set; } = false;
 }
 
 public class EditImageRequest
@@ -22,6 +24,8 @@ public class EditImageRequest
     public double GuidanceScale { get; set; } = 7.5;
     public int? Seed { get; set; }
     public bool Upscale { get; set; } = true;
+    public bool HiresFix { get; set; } = false;
+    public bool RestoreFaces { get; set; } = false;
 }
 
 public class FaceSwapRequest

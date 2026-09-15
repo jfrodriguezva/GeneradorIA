@@ -65,7 +65,7 @@ export default function ImagenesPage() {
   const [inpaintPreviewUrl, setInpaintPreviewUrl] = useState<string | null>(null);
   const [inpaintPrompt, setInpaintPrompt] = useState("");
   const [maskTarget, setMaskTarget] = useState<MaskTargetKey>("ropa");
-  const [inpaintStrength, setInpaintStrength] = useState(0.9);
+  const [inpaintStrength, setInpaintStrength] = useState(0.97);
 
   // Cambiar escenario/ropa conservando pose exacta (ControlNet)
   const [controlFile, setControlFile] = useState<File | null>(null);
@@ -87,6 +87,11 @@ export default function ImagenesPage() {
   const [restoreFace, setRestoreFace] = useState(true);
 
   const [upscale, setUpscale] = useState(true);
+  // Disponibles en "generar" y "editar": segunda pasada de refinamiento (más nítido,
+  // ~30-40% más lento) y GFPGAN sobre el resultado (requiere GFPGANv1.4.pth, si falta
+  // se ignora sin error).
+  const [hiresFix, setHiresFix] = useState(false);
+  const [restoreFacesInResult, setRestoreFacesInResult] = useState(false);
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -151,6 +156,8 @@ export default function ImagenesPage() {
           width: FRAMING_PRESETS[framing].width,
           height: FRAMING_PRESETS[framing].height,
           upscale,
+          hiresFix,
+          restoreFaces: restoreFacesInResult,
         }),
       });
 
@@ -191,6 +198,8 @@ export default function ImagenesPage() {
           steps: 50,
           guidanceScale: 7.5,
           upscale,
+          hiresFix,
+          restoreFaces: restoreFacesInResult,
         }),
       });
 
@@ -485,6 +494,20 @@ export default function ImagenesPage() {
               Escalar a Full HD
             </label>
 
+            <label className={styles.checkboxLabel}>
+              <input type="checkbox" checked={hiresFix} onChange={(e) => setHiresFix(e.target.checked)} />
+              Refinamiento extra (más nítido, ~30-40% más lento)
+            </label>
+
+            <label className={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={restoreFacesInResult}
+                onChange={(e) => setRestoreFacesInResult(e.target.checked)}
+              />
+              Pulir rostro (GFPGAN, requiere GFPGANv1.4.pth)
+            </label>
+
             <button
               className={styles.button}
               onClick={generate}
@@ -536,6 +559,20 @@ export default function ImagenesPage() {
             <label className={styles.checkboxLabel}>
               <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
               Escalar a Full HD
+            </label>
+
+            <label className={styles.checkboxLabel}>
+              <input type="checkbox" checked={hiresFix} onChange={(e) => setHiresFix(e.target.checked)} />
+              Refinamiento extra (más nítido, ~30-40% más lento)
+            </label>
+
+            <label className={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={restoreFacesInResult}
+                onChange={(e) => setRestoreFacesInResult(e.target.checked)}
+              />
+              Pulir rostro (GFPGAN, requiere GFPGANv1.4.pth)
             </label>
 
             <button

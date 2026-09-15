@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from faceswap import FaceSwapRequest, swap_faces
+from faceswap import FaceSwapRequest, swap_faces, restore_faces_in_image
 from upscale import upscale_to_fullhd
 import segmentation
 import controlnet as controlnet_mod
@@ -67,6 +67,39 @@ def _load_img2img_pipeline():
     )
     print("[image-worker] Pipeline de edición listo")
     return pipe
+
+
+def _apply_hires_fix(
+    img2img_pipe,
+    image,
+    prompt: str,
+    negative_prompt: str,
+    guidance_scale: float,
+    generator,
+    scale: float = 1.5,
+    strength: float = 0.4,
+    steps: int = 25,
+):
+    """Segunda pasada de refinamiento ("hires fix"): reescala la imagen ya generada y la
+    vuelve a pasar por img2img con strength moderado. Es la técnica estándar (la misma
+    que usan Automatic1111/ComfyUI) para sacarle más detalle fino (textura de tela, piel,
+    cabello) a un modelo de baja resolución nativa como SD1.5 sin cambiar la composición
+    — a diferencia de simplemente pedir más pasos en la generación original, que no
+    añade detalle nuevo, solo refina el mismo nivel de ruido inicial.
+    """
+    upscaled = image.resize((round(image.width * scale), round(image.height * scale)))
+    upscaled = _resize_for_sd(upscaled, max_side=max(upscaled.size))
+
+    result = img2img_pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        image=upscaled,
+        strength=strength,
+        num_inference_steps=steps,
+        guidance_scale=guidance_scale,
+        generator=generator,
+    )
+    return result.images[0]
 
 
 def _load_inpaint_pipeline():
@@ -141,6 +174,78 @@ def _load_ipadapter_pipeline():
     return pipe
 
 
+def _run_inpaint_cropped(
+    pipe,
+    image,
+    mask_image,
+    prompt: str,
+    negative_prompt: str,
+    strength: float,
+    steps: int,
+    guidance_scale: float,
+    generator,
+    crop_max_side: int = 640,
+    padding_ratio: float = 0.25,
+):
+    """Corre el inpainting solo en la zona de la máscara (con margen), a resolución
+    completa del modelo, y la vuelve a pegar en la imagen original con blending.
+
+    Correr el inpainting sobre la imagen completa (como se hacía antes) reparte la
+    "atención" del modelo sobre toda la foto y, en modo legacy (checkpoint no
+    inpainting-specific), termina regenerando un poco el fondo/zonas fuera de la
+    máscara a baja intensidad — eso es lo que se veía como un artefacto de "doble
+    exposición"/fantasma cerca de los bordes. Recortar primero (la técnica estándar de
+    "inpaint solo lo enmascarado" que usan Automatic1111/ComfyUI) evita ese problema:
+    el modelo dedica toda su resolución a la prenda/zona editada y el resto de la foto
+    queda intocado en píxeles.
+    """
+    from PIL import Image, ImageFilter
+
+    width, height = image.size
+
+    bbox = mask_image.point(lambda p: 255 if p > 10 else 0).getbbox()
+    if bbox is None:
+        bbox = (0, 0, width, height)
+    x0, y0, x1, y1 = bbox
+    pad_x = int((x1 - x0) * padding_ratio)
+    pad_y = int((y1 - y0) * padding_ratio)
+    x0 = max(0, x0 - pad_x)
+    y0 = max(0, y0 - pad_y)
+    x1 = min(width, x1 + pad_x)
+    y1 = min(height, y1 + pad_y)
+
+    crop = image.crop((x0, y0, x1, y1))
+    mask_crop = mask_image.crop((x0, y0, x1, y1))
+    crop_size = crop.size
+
+    crop_resized = _resize_for_sd(crop, max_side=crop_max_side)
+    mask_resized = mask_crop.resize(crop_resized.size)
+
+    result = pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        image=crop_resized,
+        mask_image=mask_resized,
+        strength=strength,
+        num_inference_steps=steps,
+        guidance_scale=guidance_scale,
+        generator=generator,
+    )
+    generated_crop = result.images[0].resize(crop_size)
+
+    # Blend con la máscara original. Se difumina un poco más de lo que ya trae
+    # (segmentation.generate_mask aplica su propio feather, o el usuario mandó una a
+    # mano) porque el redimensionado de ida y vuelta (crop -> resolución del modelo ->
+    # tamaño original) puede desalinear el borde por sub-píxel contra la máscara nativa,
+    # lo que se notaba como una costura/halo tenue en el borde del parche.
+    mask_blend = mask_crop.filter(ImageFilter.GaussianBlur(radius=6))
+    blended_crop = Image.composite(generated_crop, crop, mask_blend)
+
+    output = image.copy()
+    output.paste(blended_crop, (x0, y0))
+    return output
+
+
 def _resize_for_sd(image, max_side: int = 768):
     """Reduce/ajusta una imagen al tamaño máximo del modelo, redondeando a múltiplos de 8
     (requerido por el VAE de Stable Diffusion) y preservando la relación de aspecto."""
@@ -165,20 +270,27 @@ app = FastAPI(title="Generativa Image Worker", lifespan=lifespan)
 
 # Reforzado tras pruebas: además de anatomía/calidad, evita que se cuele el look
 # "amateur/foto de celular" o que derive a ilustración/render en vez de fotografía.
+# "duplicate limbs/double exposure/ghosting" se agregó tras detectar ese artefacto
+# específico en pruebas de /inpaint — ayuda en cualquier endpoint, no solo ahí.
 DEFAULT_NEGATIVE_PROMPT = (
     "blurry, low quality, low resolution, deformed, disfigured, bad anatomy, "
     "extra limbs, extra fingers, missing fingers, fused fingers, too many fingers, "
     "malformed hands, mutated hands, poorly drawn hands, watermark, text, jpeg artifacts, "
     "amateur, snapshot, phone photo, harsh flash, grainy, noisy, out of focus, "
     "flat lighting, underexposed, overexposed, illustration, painting, cartoon, "
-    "3d render, cgi, anime, duplicate"
+    "3d render, cgi, anime, duplicate, duplicate limbs, extra arm, double exposure, ghosting"
 )
 
 # Se añade automáticamente al final de cualquier prompt para subir el nivel base de
 # calidad ("máxima calidad posible" sin que el usuario tenga que escribirlo cada vez).
+# Términos más específicos que un "professional photography" genérico: marca de
+# cámara/lente y esquema de iluminación de estudio — es una práctica común de prompt
+# engineering para SD1.5 (no validada A/B en esta sesión, a diferencia del resto de
+# cambios de este archivo que sí se corrieron de punta a punta).
 QUALITY_SUFFIX = (
-    ", professional photography, ultra detailed, sharp focus, high quality, "
-    "8k uhd, natural lighting"
+    ", professional photography, shot on Canon EOS R5, 85mm lens, "
+    "three-point studio lighting, softbox, ultra detailed, sharp focus, high quality, "
+    "8k uhd, natural skin texture, editorial photoshoot"
 )
 
 
@@ -191,6 +303,12 @@ class GenerateRequest(BaseModel):
     height: int = 768
     seed: Optional[int] = None
     upscale: bool = True
+    # Segunda pasada de refinamiento (ver _apply_hires_fix): mejora nitidez/detalle de
+    # tela y piel a costa de ~30-40% más tiempo. Apagado por default porque no es gratis.
+    hires_fix: bool = False
+    # GFPGAN sobre el resultado (no solo en face-swap). Requiere GFPGANv1.4.pth; si no
+    # está, se ignora sin error (igual que en /faceswap).
+    restore_faces: bool = False
 
 
 class EditRequest(BaseModel):
@@ -201,6 +319,8 @@ class EditRequest(BaseModel):
     steps: int = 50
     guidance_scale: float = 7.5
     seed: Optional[int] = None
+    hires_fix: bool = False
+    restore_faces: bool = False
     upscale: bool = True
 
 
@@ -212,7 +332,10 @@ class InpaintRequest(BaseModel):
     # mask_target (segmentación automática: "ropa", "fondo", "persona", "rostro").
     mask_base64: Optional[str] = None
     mask_target: Optional[str] = None
-    strength: float = 0.9
+    # Ahora que /inpaint recorta y regenera solo la zona enmascarada (ver
+    # _run_inpaint_cropped), conviene un strength alto por default: ya no "arrastra" el
+    # resto de la foto como pasaba corriéndolo sobre la imagen completa.
+    strength: float = 0.97
     steps: int = 50
     guidance_scale: float = 7.5
     seed: Optional[int] = None
@@ -270,6 +393,23 @@ def generate(req: GenerateRequest):
         generator=generator,
     )
     image = result.images[0]
+
+    if req.hires_fix:
+        global _img2img_pipe
+        if _img2img_pipe is None:
+            _img2img_pipe = _load_img2img_pipeline()
+        image = _apply_hires_fix(
+            _img2img_pipe,
+            image,
+            prompt=req.prompt + QUALITY_SUFFIX,
+            negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+            guidance_scale=req.guidance_scale,
+            generator=generator,
+        )
+
+    if req.restore_faces:
+        image, _ = restore_faces_in_image(image)
+
     if req.upscale:
         image = upscale_to_fullhd(image)
 
@@ -314,6 +454,20 @@ def edit(req: EditRequest):
         generator=generator,
     )
     image = result.images[0]
+
+    if req.hires_fix:
+        image = _apply_hires_fix(
+            _img2img_pipe,
+            image,
+            prompt=req.prompt + QUALITY_SUFFIX,
+            negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+            guidance_scale=req.guidance_scale,
+            generator=generator,
+        )
+
+    if req.restore_faces:
+        image, _ = restore_faces_in_image(image)
+
     if req.upscale:
         image = upscale_to_fullhd(image)
 
@@ -365,17 +519,17 @@ def inpaint(req: InpaintRequest):
 
         generator = np.random.RandomState(req.seed)
 
-    result = _inpaint_pipe(
+    image = _run_inpaint_cropped(
+        _inpaint_pipe,
+        input_image,
+        mask_image,
         prompt=req.prompt + QUALITY_SUFFIX,
         negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
-        image=input_image,
-        mask_image=mask_image,
         strength=req.strength,
-        num_inference_steps=req.steps,
+        steps=req.steps,
         guidance_scale=req.guidance_scale,
         generator=generator,
     )
-    image = result.images[0]
     if req.upscale:
         image = upscale_to_fullhd(image)
 

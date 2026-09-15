@@ -45,7 +45,9 @@ public class ImageController : ControllerBase
             width = request.Width,
             height = request.Height,
             seed = request.Seed,
-            upscale = request.Upscale
+            upscale = request.Upscale,
+            hires_fix = request.HiresFix,
+            restore_faces = request.RestoreFaces
         };
 
         HttpResponseMessage upstreamResponse;
@@ -76,7 +78,9 @@ public class ImageController : ControllerBase
             steps = request.Steps,
             guidance_scale = request.GuidanceScale,
             seed = request.Seed,
-            upscale = request.Upscale
+            upscale = request.Upscale,
+            hires_fix = request.HiresFix,
+            restore_faces = request.RestoreFaces
         };
 
         HttpResponseMessage upstreamResponse;

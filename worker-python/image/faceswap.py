@@ -109,6 +109,20 @@ def _load_restorer():
     return _face_restorer
 
 
+def restore_faces_in_image(pil_image: Image.Image) -> tuple[Image.Image, bool]:
+    """Pasa GFPGAN sobre cualquier imagen (no solo resultado de face-swap) para pulir
+    rostros generados: piel, ojos, dientes. Devuelve (imagen, si_se_aplico) — si no está
+    el modelo descargado, devuelve la imagen sin cambios y False, sin dar error."""
+    restorer = _load_restorer()
+    if restorer is None:
+        return pil_image, False
+
+    bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
+    _, _, restored_bgr = restorer.enhance(bgr, has_aligned=False, only_center_face=False, paste_back=True)
+    restored_rgb = cv2.cvtColor(restored_bgr, cv2.COLOR_BGR2RGB)
+    return Image.fromarray(restored_rgb), True
+
+
 def _decode_image(image_base64: str):
     try:
         raw = base64.b64decode(image_base64)
@@ -138,17 +152,12 @@ def swap_faces(req: FaceSwapRequest) -> dict:
     for target_face in target_faces:
         result_bgr = _face_swapper.get(result_bgr, target_face, source_face, paste_back=True)
 
-    restored = False
-    if req.restore_face:
-        restorer = _load_restorer()
-        if restorer is not None:
-            _, _, result_bgr = restorer.enhance(
-                result_bgr, has_aligned=False, only_center_face=False, paste_back=True
-            )
-            restored = True
-
     result_rgb = cv2.cvtColor(result_bgr, cv2.COLOR_BGR2RGB)
     result_image = Image.fromarray(result_rgb)
+
+    restored = False
+    if req.restore_face:
+        result_image, restored = restore_faces_in_image(result_image)
 
     buffer = io.BytesIO()
     result_image.save(buffer, format="PNG")
