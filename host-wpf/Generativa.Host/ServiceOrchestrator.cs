@@ -62,6 +62,14 @@ public class ServiceOrchestrator
                 FileName = Path.Combine(workerPythonDir, ".venv-image", "Scripts", "python.exe"),
                 Arguments = "image/main.py",
                 WorkingDirectory = workerPythonDir,
+                // iGPU Intel vía OpenVINO: 6.8x más rápido que CPU a 50 pasos en la máquina de
+                // desarrollo (ver docs/CAPACIDADES.md). Mismo default que start-dev.ps1; si la
+                // variable ya está definida en el sistema (ej. CPU en un equipo sin iGPU), se respeta.
+                Environment =
+                {
+                    ["GENERATIVA_IMAGE_DEVICE"] =
+                        System.Environment.GetEnvironmentVariable("GENERATIVA_IMAGE_DEVICE") ?? "GPU",
+                },
             });
 
         yield return new ManagedService(
