@@ -5,6 +5,7 @@ worker-python/**/__pycache__/
 worker-python/models/*.gguf
 worker-python/image/ov-models/
 worker-python/faceswap-models/
+worker-python/segmentation-models/
 worker-python/upscale-models/*.pb
 worker-python/upscale-models/*.onnx
 

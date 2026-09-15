@@ -4,9 +4,9 @@ Todo lo que el frontend puede pedir. Tres capas: frontend → API C# (proxy puro
 Python (la IA real). Los tipos de request/response son los definidos en el código — no
 inventados.
 
-## API C# (puerto 20000) — capa de proxy
+## API C# (puerto 20001) — capa de proxy
 
-CORS restringido a `localhost:20001`/`127.0.0.1:20001`. Timeouts del cliente HTTP hacia los
+CORS restringido a `localhost:20000`/`127.0.0.1:20000`. Timeouts del cliente HTTP hacia los
 workers: 5 min para chat, 20 min para imágenes. `GET /health` a nivel de app (no de controller).
 
 | Método | Ruta | Body (`Models/*.cs`) | Reenvía a | Notas |

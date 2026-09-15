@@ -28,10 +28,10 @@ Generativa.Host.exe (app de escritorio, Windows)
   └─ abre una ventana que muestra el frontend web
   └─ enciende y vigila los 4 servicios de abajo
 
-Frontend (Next.js, http://localhost:20001)  →  lo que ves en pantalla
+Frontend (Next.js, http://localhost:20000)  →  lo que ves en pantalla
   └─ le pide cosas a...
 
-API (C#/.NET, puerto 20000)  →  solo reenvía pedidos, no piensa nada
+API (C#/.NET, puerto 20001)  →  solo reenvía pedidos, no piensa nada
   └─ le pide cosas a...
 
 Worker de chat (Python, puerto 8011)     →  el modelo de lenguaje
@@ -111,7 +111,7 @@ powershell -File start-dev.ps1
 ```
 
 Esto abre 4 ventanas de PowerShell (worker chat, worker imágenes, API, frontend). Espera a que
-las 4 digan que están listas y luego abre **http://localhost:20001** en el navegador — ya puedes
+las 4 digan que están listas y luego abre **http://localhost:20000** en el navegador — ya puedes
 usarlo así, sin necesidad de la app de escritorio.
 
 Si además quieres probar la app de escritorio (WPF):
@@ -128,8 +128,8 @@ corriendo, así que también puedes saltarte `start-dev.ps1` y simplemente corre
 
 | Servicio | Puerto |
 |---|---|
-| Frontend (Next.js) | 20001 |
-| API (C#) | 20000 |
+| Frontend (Next.js) | 20000 |
+| API (C#) | 20001 |
 | Worker chat | 8011 |
 | Worker imágenes | 8002 |
 

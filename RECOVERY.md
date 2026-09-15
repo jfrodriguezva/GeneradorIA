@@ -40,7 +40,7 @@ correrlo) → `CLAUDE.md` (para entender el porqué de las decisiones) → `docs
 WPF Host (Windows, WebView2)
   └─ vigila y lanza 4 procesos (ServiceOrchestrator.cs)
 
-Next.js (20001) → API C# (20000, solo proxy) → Worker chat Python (8011, llama-cpp-python + Qwen2.5-3B)
+Next.js (20000) → API C# (20001, solo proxy) → Worker chat Python (8011, llama-cpp-python + Qwen2.5-3B)
                                               → Worker imagen Python (8002, OpenVINO + SD1.5 + InsightFace + OpenCV)
 ```
 
