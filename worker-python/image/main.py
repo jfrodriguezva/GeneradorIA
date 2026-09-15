@@ -329,19 +329,33 @@ DEFAULT_NEGATIVE_PROMPT = (
     "malformed hands, mutated hands, poorly drawn hands, watermark, text, jpeg artifacts, "
     "amateur, snapshot, phone photo, harsh flash, grainy, noisy, out of focus, "
     "flat lighting, underexposed, overexposed, illustration, painting, cartoon, "
-    "3d render, cgi, anime, duplicate, duplicate limbs, extra arm, double exposure, ghosting"
+    "3d render, cgi, anime, duplicate, duplicate limbs, extra arm, double exposure, ghosting, "
+    # Agregado tras notar que las caras salían con un look sintético/plástico
+    # reconocible: simetría perfecta, mirada vidriosa/vacía y piel demasiado uniforme
+    # son justo los tells clásicos de SD1.5 que un negative prompt sí puede atenuar
+    # (no elimina el techo del modelo, pero ayuda). No probado A/B en esta sesión.
+    "perfectly symmetrical face, doll-like eyes, glassy eyes, vacant stare, dead eyes, "
+    "airbrushed skin, plastic skin, waxy skin, mannequin, uncanny valley"
 )
 
 # Se añade automáticamente al final de cualquier prompt para subir el nivel base de
 # calidad ("máxima calidad posible" sin que el usuario tenga que escribirlo cada vez).
-# Términos más específicos que un "professional photography" genérico: marca de
-# cámara/lente y esquema de iluminación de estudio — es una práctica común de prompt
-# engineering para SD1.5 (no validada A/B en esta sesión, a diferencia del resto de
-# cambios de este archivo que sí se corrieron de punta a punta).
+# Se cambió la iluminación de "three-point studio lighting, softbox" (muy plana/pareja,
+# uno de los tells de que la cara "se ve falsa") a luz direccional suave.
+#
+# OJO — probado en esta sesión y revertido en parte: una primera versión usaba "soft
+# directional window light" + "candid editorial photoshoot". Con un prompt genérico sin
+# describir ropa, esa combinación derivó en desnudez no pedida — probablemente porque
+# esos términos están asociados en el dataset de este checkpoint (Realistic Vision) con
+# fotografía íntima/boudoir. Se quitaron "window light" y "candid" por esa razón, dejando
+# solo iluminación de estudio direccional (menos plana que el "three-point" original,
+# sin el vocabulario asociado a boudoir). Esta versión revertida NO se volvió a correr
+# de punta a punta tras el cambio — si generas algo con esto, revisa el resultado.
 QUALITY_SUFFIX = (
     ", professional photography, shot on Canon EOS R5, 85mm lens, "
-    "three-point studio lighting, softbox, ultra detailed, sharp focus, high quality, "
-    "8k uhd, natural skin texture, editorial photoshoot"
+    "softbox key light with subtle rim light, gentle directional shadows, "
+    "ultra detailed, sharp focus, high quality, 8k uhd, natural skin texture, "
+    "subtle skin imperfections, editorial photoshoot"
 )
 
 
