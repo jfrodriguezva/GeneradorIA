@@ -49,11 +49,13 @@ public class InpaintRequest
     // ("ropa" | "fondo" | "persona" | "rostro") para que se genere sola.
     public string? MaskBase64 { get; set; }
     public string? MaskTarget { get; set; }
-    public double Strength { get; set; } = 0.9;
+    public double Strength { get; set; } = 0.97;
     public int Steps { get; set; } = 50;
     public double GuidanceScale { get; set; } = 7.5;
     public int? Seed { get; set; }
     public bool Upscale { get; set; } = true;
+    public bool HiresFix { get; set; } = false;
+    public bool RestoreFaces { get; set; } = false;
 }
 
 public class ControlledGenerateRequest

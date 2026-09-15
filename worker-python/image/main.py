@@ -77,7 +77,7 @@ def _apply_hires_fix(
     guidance_scale: float,
     generator,
     scale: float = 1.5,
-    strength: float = 0.4,
+    strength: float = 0.25,
     steps: int = 25,
 ):
     """Segunda pasada de refinamiento ("hires fix"): reescala la imagen ya generada y la
@@ -86,6 +86,14 @@ def _apply_hires_fix(
     cabello) a un modelo de baja resolución nativa como SD1.5 sin cambiar la composición
     — a diferencia de simplemente pedir más pasos en la generación original, que no
     añade detalle nuevo, solo refina el mismo nivel de ruido inicial.
+
+    strength bajo a propósito (0.25, no el 0.4 típico de las guías genéricas): en pruebas
+    reales, 0.4 le dio suficiente libertad al img2img para desviarse de la composición
+    pedida en el prompt (en un caso, un escote que debía quedar cerrado terminó abierto).
+    A 0.25 el refinamiento sigue añadiendo nitidez/textura pero se apega más a la imagen
+    de entrada. No se agregó ningún término de negative_prompt para esto a propósito: el
+    proyecto no tiene filtro de contenido por diseño (ver CLAUDE.md) y este es un ajuste
+    de fidelidad a la composición pedida, no una decisión de qué contenido permitir.
     """
     upscaled = image.resize((round(image.width * scale), round(image.height * scale)))
     upscaled = _resize_for_sd(upscaled, max_side=max(upscaled.size))
@@ -174,6 +182,59 @@ def _load_ipadapter_pipeline():
     return pipe
 
 
+def _mask_bbox_with_padding(mask_image, width: int, height: int, padding_ratio: float):
+    bbox = mask_image.point(lambda p: 255 if p > 10 else 0).getbbox()
+    if bbox is None:
+        return (0, 0, width, height)
+    x0, y0, x1, y1 = bbox
+    pad_x = int((x1 - x0) * padding_ratio)
+    pad_y = int((y1 - y0) * padding_ratio)
+    x0 = max(0, x0 - pad_x)
+    y0 = max(0, y0 - pad_y)
+    x1 = min(width, x1 + pad_x)
+    y1 = min(height, y1 + pad_y)
+    return (x0, y0, x1, y1)
+
+
+def _apply_hires_fix_to_masked_region(
+    img2img_pipe,
+    image,
+    mask_image,
+    prompt: str,
+    negative_prompt: str,
+    guidance_scale: float,
+    generator,
+    padding_ratio: float = 0.12,
+    **hires_kwargs,
+):
+    """Igual que _apply_hires_fix, pero solo dentro de la zona de la máscara (mismo
+    recorte que usó /inpaint). Hace falta esta variante para /inpaint: aplicar el
+    refinamiento sobre la imagen COMPLETA (como hacen /generate y /edit, que no tienen
+    concepto de "zona editada") deja que el img2img sin restricción reinterprete partes
+    de la foto fuera de lo que se pidió cambiar — se detectó esto en pruebas reales,
+    donde afectó incluso el escote de la prenda más allá de lo generado por el inpaint.
+    Restringir el refinamiento al mismo recorte evita ese arrastre."""
+    from PIL import Image, ImageFilter
+
+    width, height = image.size
+    x0, y0, x1, y1 = _mask_bbox_with_padding(mask_image, width, height, padding_ratio)
+
+    crop = image.crop((x0, y0, x1, y1))
+    mask_crop = mask_image.crop((x0, y0, x1, y1))
+
+    refined_crop = _apply_hires_fix(
+        img2img_pipe, crop, prompt=prompt, negative_prompt=negative_prompt,
+        guidance_scale=guidance_scale, generator=generator, **hires_kwargs,
+    ).resize(crop.size)
+
+    mask_blend = mask_crop.filter(ImageFilter.GaussianBlur(radius=6))
+    blended_crop = Image.composite(refined_crop, crop, mask_blend)
+
+    output = image.copy()
+    output.paste(blended_crop, (x0, y0))
+    return output
+
+
 def _run_inpaint_cropped(
     pipe,
     image,
@@ -202,17 +263,7 @@ def _run_inpaint_cropped(
     from PIL import Image, ImageFilter
 
     width, height = image.size
-
-    bbox = mask_image.point(lambda p: 255 if p > 10 else 0).getbbox()
-    if bbox is None:
-        bbox = (0, 0, width, height)
-    x0, y0, x1, y1 = bbox
-    pad_x = int((x1 - x0) * padding_ratio)
-    pad_y = int((y1 - y0) * padding_ratio)
-    x0 = max(0, x0 - pad_x)
-    y0 = max(0, y0 - pad_y)
-    x1 = min(width, x1 + pad_x)
-    y1 = min(height, y1 + pad_y)
+    x0, y0, x1, y1 = _mask_bbox_with_padding(mask_image, width, height, padding_ratio)
 
     crop = image.crop((x0, y0, x1, y1))
     mask_crop = mask_image.crop((x0, y0, x1, y1))
@@ -340,6 +391,8 @@ class InpaintRequest(BaseModel):
     guidance_scale: float = 7.5
     seed: Optional[int] = None
     upscale: bool = True
+    hires_fix: bool = False
+    restore_faces: bool = False
 
 
 class ControlledGenerateRequest(BaseModel):
@@ -530,6 +583,27 @@ def inpaint(req: InpaintRequest):
         guidance_scale=req.guidance_scale,
         generator=generator,
     )
+
+    if req.hires_fix:
+        # Restringido a la misma zona enmascarada (ver _apply_hires_fix_to_masked_region):
+        # aplicarlo sin máscara sobre toda la imagen dejó que el refinamiento reinterpretara
+        # partes de la foto fuera de lo pedido (detectado en pruebas reales).
+        global _img2img_pipe
+        if _img2img_pipe is None:
+            _img2img_pipe = _load_img2img_pipeline()
+        image = _apply_hires_fix_to_masked_region(
+            _img2img_pipe,
+            image,
+            mask_image,
+            prompt=req.prompt + QUALITY_SUFFIX,
+            negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+            guidance_scale=req.guidance_scale,
+            generator=generator,
+        )
+
+    if req.restore_faces:
+        image, _ = restore_faces_in_image(image)
+
     if req.upscale:
         image = upscale_to_fullhd(image)
 
