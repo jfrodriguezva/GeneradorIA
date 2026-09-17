@@ -15,7 +15,11 @@ builder.Services.AddHttpClient("ChatWorker", client =>
 builder.Services.AddHttpClient("ImageWorker", client =>
 {
     client.BaseAddress = new Uri(imageWorkerBaseUrl);
-    client.Timeout = TimeSpan.FromMinutes(20);
+    // Subido de 20 a 45 min: combinar hires_fix + restore_faces + strength alto en
+    // /inpaint puede pasar los 20 min en CPU (visto en uso real, no solo en teoría) y
+    // el timeout anterior lo cortaba a medias -- ver ImageController.ForwardToWorkerAsync
+    // para el manejo de error cuando de todos modos se agota.
+    client.Timeout = TimeSpan.FromMinutes(45);
 });
 
 builder.Services.AddCors(options =>

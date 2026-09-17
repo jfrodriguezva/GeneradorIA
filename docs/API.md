@@ -7,7 +7,9 @@ inventados.
 ## API C# (puerto 20000) — capa de proxy
 
 CORS restringido a `localhost:20001`/`127.0.0.1:20001`. Timeouts del cliente HTTP hacia los
-workers: 5 min para chat, 20 min para imágenes. `GET /health` a nivel de app (no de controller).
+workers: 5 min para chat, 45 min para imágenes (subido de 20 min tras un timeout real en uso
+normal con hires_fix+restore_faces+strength alto combinados). `GET /health` a nivel de app
+(no de controller).
 
 | Método | Ruta | Body (`Models/*.cs`) | Reenvía a | Notas |
 |---|---|---|---|---|
