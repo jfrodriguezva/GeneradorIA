@@ -88,7 +88,7 @@ orientado a evitar artefactos de anatomía típicos de SD1.5. Ver [`CAPACIDADES.
 para el análisis completo de calidad.
 
 Config vía variables de entorno: `GENERATIVA_IMAGE_MODEL_ID` (default
-`SG161222/Realistic_Vision_V5.1_noVAE`), `GENERATIVA_IMAGE_OV_DIR`,
+`emilianJR/epiCRealism`), `GENERATIVA_IMAGE_OV_DIR`,
 `GENERATIVA_IMAGE_DEVICE=CPU` (también acepta `GPU`/`AUTO` si hay iGPU Intel),
 `GENERATIVA_UPSCALE_MODEL_PATH`, `GENERATIVA_GFPGAN_MODEL_PATH`.
 

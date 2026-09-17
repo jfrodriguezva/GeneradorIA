@@ -90,7 +90,7 @@ python -m venv .venv-image
   `worker-python\models\qwen2.5-3b-instruct-q4_k_m.gguf` (crea la carpeta `models` si no
   existe). _(Pendiente: pega aquí el enlace de descarga que estés usando — no venía
   documentado en el repo)._
-- **Imágenes (Realistic Vision V5.1)**: no requiere descarga manual — la primera vez que
+- **Imágenes (epiCRealism)**: no requiere descarga manual — la primera vez que
   generes una imagen, el worker la descarga desde Hugging Face y la convierte a formato
   OpenVINO automáticamente (tarda varios minutos, solo la primera vez; necesita internet en
   ese momento).

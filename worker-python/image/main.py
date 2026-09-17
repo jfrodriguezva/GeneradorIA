@@ -15,7 +15,14 @@ import controlnet as controlnet_mod
 # Modelo de alta calidad (no-turbo) para fotorrealismo, incluye personas.
 # Requiere más pasos de inferencia (mucho más lento que SD-Turbo) pero da resultados
 # muchísimo mejores en anatomía, rostros y detalle. Cambiar por env var si se prefiere otro.
-MODEL_ID = os.environ.get("GENERATIVA_IMAGE_MODEL_ID", "SG161222/Realistic_Vision_V5.1_noVAE")
+#
+# epiCRealism en vez de Realistic Vision (usado hasta antes de este cambio): probado en
+# esta sesión con el mismo prompt genérico — rostro notablemente más realista (ojos con
+# asimetría/reflejo natural en vez de "mirada vidriosa", piel con textura en vez de
+# aerografiada). Fue el cambio de mayor impacto en calidad facial de toda la sesión, más
+# que cualquier ajuste de prompt/negative prompt. Mismo tamaño/arquitectura SD1.5, no
+# requiere más hardware.
+MODEL_ID = os.environ.get("GENERATIVA_IMAGE_MODEL_ID", "emilianJR/epiCRealism")
 MODEL_CACHE_NAME = MODEL_ID.split("/")[-1]
 OV_MODEL_DIR = os.environ.get(
     "GENERATIVA_IMAGE_OV_DIR", os.path.join(os.path.dirname(__file__), "ov-models", MODEL_CACHE_NAME)

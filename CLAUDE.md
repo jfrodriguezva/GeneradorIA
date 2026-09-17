@@ -22,7 +22,7 @@ Worker chat Python (puerto 8011) — worker-python/chat/main.py
   └─ llama-cpp-python + Qwen2.5-3B-Instruct GGUF (CPU)
 
 Worker imágenes Python (puerto 8002) — worker-python/image/main.py
-  └─ optimum-intel (OpenVINO) + Realistic_Vision_V5.1_noVAE (SD1.5)
+  └─ optimum-intel (OpenVINO) + epiCRealism (SD1.5)
   └─ txt2img, img2img (edición), face-swap (InsightFace+inswapper), upscale (OpenCV FSRCNN)
 ```
 
@@ -55,10 +55,17 @@ Levanta los 4 servicios en ventanas separadas. Luego, aparte: `cd host-wpf/Gener
 - **Chat**: `Qwen2.5-3B-Instruct` GGUF Q4_K_M (~2GB) vía `llama-cpp-python`. Elegido por ser
   pequeño/rápido para validar la plomería; se puede subir a un modelo más grande si el hardware
   lo permite (más RAM/CPU o GPU).
-- **Imágenes**: `SG161222/Realistic_Vision_V5.1_noVAE` (arquitectura SD1.5) en vez de SD-Turbo
-  (que se probó primero pero da calidad muy inferior, solo 1 paso). Este modelo da mucho mejor
-  fotorrealismo/anatomía a costa de velocidad: **8-14 min por imagen a 20-30 pasos, 512x768,
-  en CPU sin GPU dedicada**. A 60 pasos (más calidad para escenas complejas) puede tardar 15-20 min.
+- **Imágenes**: `emilianJR/epiCRealism` (arquitectura SD1.5) — cambiado desde
+  `SG161222/Realistic_Vision_V5.1_noVAE` tras comparar ambos con el mismo prompt genérico:
+  epiCRealism da rostros notablemente más realistas (ojos con asimetría/reflejo natural en vez
+  de "mirada vidriosa", piel con textura en vez de aerografiada). Fue el cambio de mayor impacto
+  en calidad facial de toda la sesión de ajustes — más que cualquier ajuste de prompt/negative
+  prompt, que ya se había agotado antes de probar esto. Antes de Realistic Vision se había
+  probado SD-Turbo (calidad muy inferior, solo 1 paso). Mismo tamaño/arquitectura SD1.5 que
+  antes, no requiere más hardware: **8-14 min por imagen a 20-30 pasos, 512x768, en CPU sin GPU
+  dedicada** (tiempos medidos con Realistic Vision; con epiCRealism una generación real de 50
+  pasos midió ~24 min en esta sesión — no se hizo una comparación de velocidad controlada entre
+  ambos checkpoints). A 60 pasos (más calidad para escenas complejas) puede tardar 15-20 min.
 - **Face-swap**: InsightFace `buffalo_l` (análisis de rostro) + `inswapper_128.onnx`
   (intercambio). Corre en CPU vía onnxruntime, **segundos** por swap — mucho más rápido que
   difusión porque es una red pequeña especializada, no un modelo generativo completo.
@@ -68,7 +75,7 @@ Levanta los 4 servicios en ventanas separadas. Luego, aparte: `cd host-wpf/Gener
 - **Segmentación (para inpainting dirigido)**: `mattmdjaga/segformer_b2_clothes` vía
   `transformers` — separa ropa/persona/fondo/rostro para generar la máscara sola sin que el
   usuario tenga que dibujarla. Ver `worker-python/image/segmentation.py`.
-- **Inpainting**: mismo checkpoint que `/generate`/`/edit` (Realistic Vision), vía
+- **Inpainting**: mismo checkpoint que `/generate`/`/edit` (epiCRealism), vía
   `OVStableDiffusionInpaintPipeline` (sí soportado en OpenVINO/optimum-intel para SD1.5, a
   diferencia de ControlNet e IP-Adapter — ver más abajo). Al no ser un checkpoint
   "inpainting-specific" corre en modo "legacy" (mezcla de latentes según la máscara).
