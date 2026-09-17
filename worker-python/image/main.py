@@ -36,6 +36,22 @@ _controlnet_pipes: dict = {}  # control_type -> pipeline, se cargan bajo demanda
 _ipadapter_pipe = None  # pipeline aparte en torch/CPU puro, ver _load_ipadapter_pipeline
 
 
+def _disable_safety_checker(pipe):
+    """Fuerza el safety_checker a None sin importar si el checkpoint lo trae activo.
+
+    Detectado en esta sesión al cambiar a epiCRealism: Realistic Vision (el checkpoint
+    anterior) no incluye safety_checker en su config, así que nunca se activaba; epiCRealism
+    sí lo trae, y disparó un falso positivo devolviendo una imagen negra en un caso de uso
+    normal (inpainting de ropa sobre una foto ya generada). El proyecto no tiene filtro de
+    contenido por diseño (ver CLAUDE.md) — esto no debe depender de qué checkpoint se use.
+    """
+    if hasattr(pipe, "safety_checker"):
+        pipe.safety_checker = None
+    if hasattr(pipe, "requires_safety_checker"):
+        pipe.requires_safety_checker = False
+    return pipe
+
+
 def _load_pipeline():
     from optimum.intel import OVStableDiffusionPipeline
     from diffusers import DPMSolverMultistepScheduler
@@ -58,7 +74,7 @@ def _load_pipeline():
         algorithm_type="dpmsolver++",
         final_sigmas_type="sigma_min",
     )
-    return pipe
+    return _disable_safety_checker(pipe)
 
 
 def _load_img2img_pipeline():
@@ -73,7 +89,7 @@ def _load_img2img_pipeline():
         final_sigmas_type="sigma_min",
     )
     print("[image-worker] Pipeline de edición listo")
-    return pipe
+    return _disable_safety_checker(pipe)
 
 
 def _apply_hires_fix(
@@ -133,7 +149,7 @@ def _load_inpaint_pipeline():
         final_sigmas_type="sigma_min",
     )
     print("[image-worker] Pipeline de inpainting listo")
-    return pipe
+    return _disable_safety_checker(pipe)
 
 
 def _load_controlnet_pipeline(control_type: str):
