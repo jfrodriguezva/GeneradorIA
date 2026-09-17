@@ -346,33 +346,20 @@ app = FastAPI(title="Generativa Image Worker", lifespan=lifespan)
 # "amateur/foto de celular" o que derive a ilustración/render en vez de fotografía.
 # "duplicate limbs/double exposure/ghosting" se agregó tras detectar ese artefacto
 # específico en pruebas de /inpaint — ayuda en cualquier endpoint, no solo ahí.
+# OJO — bug real encontrado y corregido en esta sesión: CLIP (el text encoder de SD1.5)
+# trunca en 77 tokens SIN avisar. Una versión anterior de este negative prompt llegó a
+# 223 tokens — todo lo que quedaba después del token 77 (la mayoría de lo agregado a lo
+# largo de la sesión: anti-fantasma, proporciones, simetría facial) nunca llegaba al
+# modelo. Explica por qué varios "ajustes" de esta sesión no cambiaban nada de forma
+# confiable: no era ruido aleatorio, es que ni se aplicaban. Verificar con
+# `tokenizer(DEFAULT_NEGATIVE_PROMPT).input_ids` (len <= 77) antes de agregar más texto
+# aquí — y poner lo más importante primero, porque si se pasa del límite se corta el
+# final, no el principio.
 DEFAULT_NEGATIVE_PROMPT = (
-    "blurry, low quality, low resolution, deformed, disfigured, bad anatomy, "
-    "extra limbs, extra fingers, missing fingers, fused fingers, too many fingers, "
-    "malformed hands, mutated hands, poorly drawn hands, watermark, text, jpeg artifacts, "
-    "amateur, snapshot, phone photo, harsh flash, grainy, noisy, out of focus, "
-    "flat lighting, underexposed, overexposed, illustration, painting, cartoon, "
-    "3d render, cgi, anime, duplicate, duplicate limbs, extra arm, double exposure, ghosting, "
-    # Agregado tras notar que las caras salían con un look sintético/plástico
-    # reconocible: simetría perfecta, mirada vidriosa/vacía y piel demasiado uniforme
-    # son justo los tells clásicos de SD1.5 que un negative prompt sí puede atenuar
-    # (no elimina el techo del modelo, pero ayuda). No probado A/B en esta sesión.
-    "perfectly symmetrical face, doll-like eyes, glassy eyes, vacant stare, dead eyes, "
-    "airbrushed skin, plastic skin, waxy skin, mannequin, uncanny valley, "
-    # Proporciones corporales: "bad anatomy" ya estaba pero es muy genérico. Estos son
-    # los errores de proporción específicos y recurrentes de SD1.5 (torso/cuello
-    # alargados, cabeza chica, brazos cortos) — no probado A/B en esta sesión.
-    "long torso, elongated neck, small head, disproportionate body, "
-    "long body, short arms, malformed body proportions, "
-    # Detectado repetidamente en /inpaint con prendas de tirantes finos: el modelo
-    # intenta agregar una capa/chal translúcido que no resuelve bien (se ve como un
-    # "fantasma" en los hombros) y el color pedido se diluye hacia tonos pastel. Probado
-    # en aislamiento (misma semilla, mismo padding, solo este cambio): sí corrige el
-    # color de forma consistente; el fantasma se reduce pero no se elimina del todo —
-    # sigue siendo el punto débil conocido de este tipo de prenda en este pipeline.
-    "sheer overlay, cape, shawl, wrap, sheer cape sleeves, translucent fabric drape, "
-    "floating fabric, disconnected fabric, extra limb, floating limb, disembodied limb, "
-    "wrong color, faded color, desaturated color"
+    "blurry, low quality, deformed, bad anatomy, extra fingers, fused fingers, "
+    "malformed hands, floating limb, sheer overlay, cape, floating fabric, "
+    "wrong color, disproportionate body, symmetrical face, glassy eyes, plastic skin, "
+    "watermark, text, illustration, cartoon, 3d render, anime"
 )
 
 # Se añade automáticamente al final de cualquier prompt para subir el nivel base de
@@ -388,11 +375,15 @@ DEFAULT_NEGATIVE_PROMPT = (
 # solo iluminación de estudio direccional (menos plana que el "three-point" original,
 # sin el vocabulario asociado a boudoir). Esta versión revertida NO se volvió a correr
 # de punta a punta tras el cambio — si generas algo con esto, revisa el resultado.
+#
+# Recortado (57 -> ~35 tokens): el mismo límite de 77 tokens de CLIP que truncaba el
+# negative prompt (ver arriba) aplica aquí. Con prompts de usuario largos, este sufijo
+# competía por el poco espacio que queda — se priorizan los términos con más impacto
+# observado (iluminación, piel) sobre los que nunca se probaron aislados (marca de
+# cámara/lente).
 QUALITY_SUFFIX = (
-    ", professional photography, shot on Canon EOS R5, 85mm lens, "
-    "softbox key light with subtle rim light, gentle directional shadows, "
-    "ultra detailed, sharp focus, high quality, 8k uhd, natural skin texture, "
-    "subtle skin imperfections, editorial photoshoot"
+    ", professional photography, softbox key light with subtle rim light, "
+    "ultra detailed, sharp focus, high quality, natural skin texture"
 )
 
 
