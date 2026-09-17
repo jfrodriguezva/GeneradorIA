@@ -245,7 +245,7 @@ def _run_inpaint_cropped(
     steps: int,
     guidance_scale: float,
     generator,
-    crop_max_side: int = 640,
+    crop_max_side: int = 768,  # subido de 640: más resolución para detalle fino de tela/costuras
     padding_ratio: float = 0.25,
 ):
     """Corre el inpainting solo en la zona de la máscara (con margen), a resolución
@@ -335,7 +335,12 @@ DEFAULT_NEGATIVE_PROMPT = (
     # son justo los tells clásicos de SD1.5 que un negative prompt sí puede atenuar
     # (no elimina el techo del modelo, pero ayuda). No probado A/B en esta sesión.
     "perfectly symmetrical face, doll-like eyes, glassy eyes, vacant stare, dead eyes, "
-    "airbrushed skin, plastic skin, waxy skin, mannequin, uncanny valley"
+    "airbrushed skin, plastic skin, waxy skin, mannequin, uncanny valley, "
+    # Proporciones corporales: "bad anatomy" ya estaba pero es muy genérico. Estos son
+    # los errores de proporción específicos y recurrentes de SD1.5 (torso/cuello
+    # alargados, cabeza chica, brazos cortos) — no probado A/B en esta sesión.
+    "long torso, elongated neck, small head, disproportionate body, "
+    "long body, short arms, malformed body proportions"
 )
 
 # Se añade automáticamente al final de cualquier prompt para subir el nivel base de
