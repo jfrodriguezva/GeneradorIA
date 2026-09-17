@@ -363,7 +363,16 @@ DEFAULT_NEGATIVE_PROMPT = (
     # los errores de proporción específicos y recurrentes de SD1.5 (torso/cuello
     # alargados, cabeza chica, brazos cortos) — no probado A/B en esta sesión.
     "long torso, elongated neck, small head, disproportionate body, "
-    "long body, short arms, malformed body proportions"
+    "long body, short arms, malformed body proportions, "
+    # Detectado repetidamente en /inpaint con prendas de tirantes finos: el modelo
+    # intenta agregar una capa/chal translúcido que no resuelve bien (se ve como un
+    # "fantasma" en los hombros) y el color pedido se diluye hacia tonos pastel. Probado
+    # en aislamiento (misma semilla, mismo padding, solo este cambio): sí corrige el
+    # color de forma consistente; el fantasma se reduce pero no se elimina del todo —
+    # sigue siendo el punto débil conocido de este tipo de prenda en este pipeline.
+    "sheer overlay, cape, shawl, wrap, sheer cape sleeves, translucent fabric drape, "
+    "floating fabric, disconnected fabric, extra limb, floating limb, disembodied limb, "
+    "wrong color, faded color, desaturated color"
 )
 
 # Se añade automáticamente al final de cualquier prompt para subir el nivel base de
