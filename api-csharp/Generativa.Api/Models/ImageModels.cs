@@ -69,6 +69,7 @@ public class ControlledGenerateRequest
     public double GuidanceScale { get; set; } = 7.5;
     public int? Seed { get; set; }
     public bool Upscale { get; set; } = true;
+    public bool RestoreFaces { get; set; } = false;
 }
 
 public class ReferenceGenerateRequest
@@ -83,4 +84,5 @@ public class ReferenceGenerateRequest
     public int Height { get; set; } = 768;
     public int? Seed { get; set; }
     public bool Upscale { get; set; } = true;
+    public bool RestoreFaces { get; set; } = false;
 }

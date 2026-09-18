@@ -457,6 +457,7 @@ class ControlledGenerateRequest(BaseModel):
     guidance_scale: float = 7.5
     seed: Optional[int] = None
     upscale: bool = True
+    restore_faces: bool = False
 
 
 class ReferenceGenerateRequest(BaseModel):
@@ -470,6 +471,7 @@ class ReferenceGenerateRequest(BaseModel):
     height: int = 768
     seed: Optional[int] = None
     upscale: bool = True
+    restore_faces: bool = False
 
 
 @app.get("/health")
@@ -707,6 +709,10 @@ def generate_controlled(req: ControlledGenerateRequest):
             generator=generator,
         )
         image = result.images[0]
+
+    if req.restore_faces:
+        image, _ = restore_faces_in_image(image)
+
     if req.upscale:
         image = upscale_to_fullhd(image)
 
@@ -754,6 +760,10 @@ def generate_with_reference(req: ReferenceGenerateRequest):
             generator=generator,
         )
         image = result.images[0]
+
+    if req.restore_faces:
+        image, _ = restore_faces_in_image(image)
+
     if req.upscale:
         image = upscale_to_fullhd(image)
 

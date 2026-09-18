@@ -185,7 +185,8 @@ public class ImageController : ControllerBase
             steps = request.Steps,
             guidance_scale = request.GuidanceScale,
             seed = request.Seed,
-            upscale = request.Upscale
+            upscale = request.Upscale,
+            restore_faces = request.RestoreFaces
         };
 
         return await ForwardToWorkerAsync(client, "/generate-controlled", payload, cancellationToken);
@@ -207,7 +208,8 @@ public class ImageController : ControllerBase
             width = request.Width,
             height = request.Height,
             seed = request.Seed,
-            upscale = request.Upscale
+            upscale = request.Upscale,
+            restore_faces = request.RestoreFaces
         };
 
         return await ForwardToWorkerAsync(client, "/generate-with-reference", payload, cancellationToken);

@@ -229,6 +229,7 @@ export default function ImagenesPage() {
           steps: 50,
           guidanceScale: 7.5,
           upscale,
+          restoreFaces,
         };
       } else if (mode === "reference") {
         endpoint = "/api/image/generate-with-reference";
@@ -242,6 +243,7 @@ export default function ImagenesPage() {
           width: FRAMING_PRESETS[framing].width,
           height: FRAMING_PRESETS[framing].height,
           upscale,
+          restoreFaces,
         };
       } else if (mode === "faceswap") {
         endpoint = "/api/image/faceswap";
