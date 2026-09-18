@@ -10,6 +10,7 @@ worker-python/upscale-models/*.onnx
 # Pesos de facexlib que GFPGAN descarga solo la primera vez que se usa (detección/parseo
 # de rostro), separados de faceswap-models/GFPGANv1.4.pth que sí hay que poner a mano.
 worker-python/image/gfpgan/
+worker-python/*.log
 
 # .NET
 api-csharp/**/bin/

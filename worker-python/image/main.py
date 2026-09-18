@@ -1,6 +1,7 @@
 import base64
 import io
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -34,6 +35,15 @@ _img2img_pipe = None
 _inpaint_pipe = None
 _controlnet_pipes: dict = {}  # control_type -> pipeline, se cargan bajo demanda
 _ipadapter_pipe = None  # pipeline aparte en torch/CPU puro, ver _load_ipadapter_pipeline
+
+# Bug real encontrado en uso normal (dos pedidos casi simultáneos, uno desde el navegador y
+# otro desde una prueba en curso): el "infer request" de OpenVINO que hay detrás de estos
+# pipelines no soporta que dos llamadas lo usen al mismo tiempo -- tronaba con
+# "RuntimeError: Infer Request is busy". FastAPI corre los endpoints sync en un threadpool,
+# así que dos requests sí pueden llegar en paralelo a threads distintos. Este lock serializa
+# el acceso a los pipelines (nunca corre inferencia en paralelo dentro de este proceso) en
+# vez de dejar que la segunda llamada truene -- la segunda simplemente espera su turno.
+_inference_lock = threading.Lock()
 
 
 def _disable_safety_checker(pipe):
@@ -478,32 +488,33 @@ def generate(req: GenerateRequest):
 
         generator = np.random.RandomState(req.seed)
 
-    result = _pipe(
-        prompt=req.prompt + QUALITY_SUFFIX,
-        negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
-        num_inference_steps=req.steps,
-        guidance_scale=req.guidance_scale,
-        width=req.width,
-        height=req.height,
-        generator=generator,
-    )
-    image = result.images[0]
-
-    if req.hires_fix:
-        global _img2img_pipe
-        if _img2img_pipe is None:
-            _img2img_pipe = _load_img2img_pipeline()
-        image = _apply_hires_fix(
-            _img2img_pipe,
-            image,
+    with _inference_lock:
+        result = _pipe(
             prompt=req.prompt + QUALITY_SUFFIX,
             negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+            num_inference_steps=req.steps,
             guidance_scale=req.guidance_scale,
+            width=req.width,
+            height=req.height,
             generator=generator,
         )
+        image = result.images[0]
 
-    if req.restore_faces:
-        image, _ = restore_faces_in_image(image)
+        if req.hires_fix:
+            global _img2img_pipe
+            if _img2img_pipe is None:
+                _img2img_pipe = _load_img2img_pipeline()
+            image = _apply_hires_fix(
+                _img2img_pipe,
+                image,
+                prompt=req.prompt + QUALITY_SUFFIX,
+                negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+                guidance_scale=req.guidance_scale,
+                generator=generator,
+            )
+
+        if req.restore_faces:
+            image, _ = restore_faces_in_image(image)
 
     if req.upscale:
         image = upscale_to_fullhd(image)
@@ -539,29 +550,30 @@ def edit(req: EditRequest):
 
         generator = np.random.RandomState(req.seed)
 
-    result = _img2img_pipe(
-        prompt=req.prompt + QUALITY_SUFFIX,
-        negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
-        image=input_image,
-        strength=req.strength,
-        num_inference_steps=req.steps,
-        guidance_scale=req.guidance_scale,
-        generator=generator,
-    )
-    image = result.images[0]
-
-    if req.hires_fix:
-        image = _apply_hires_fix(
-            _img2img_pipe,
-            image,
+    with _inference_lock:
+        result = _img2img_pipe(
             prompt=req.prompt + QUALITY_SUFFIX,
             negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+            image=input_image,
+            strength=req.strength,
+            num_inference_steps=req.steps,
             guidance_scale=req.guidance_scale,
             generator=generator,
         )
+        image = result.images[0]
 
-    if req.restore_faces:
-        image, _ = restore_faces_in_image(image)
+        if req.hires_fix:
+            image = _apply_hires_fix(
+                _img2img_pipe,
+                image,
+                prompt=req.prompt + QUALITY_SUFFIX,
+                negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+                guidance_scale=req.guidance_scale,
+                generator=generator,
+            )
+
+        if req.restore_faces:
+            image, _ = restore_faces_in_image(image)
 
     if req.upscale:
         image = upscale_to_fullhd(image)
@@ -614,37 +626,38 @@ def inpaint(req: InpaintRequest):
 
         generator = np.random.RandomState(req.seed)
 
-    image = _run_inpaint_cropped(
-        _inpaint_pipe,
-        input_image,
-        mask_image,
-        prompt=req.prompt + QUALITY_SUFFIX,
-        negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
-        strength=req.strength,
-        steps=req.steps,
-        guidance_scale=req.guidance_scale,
-        generator=generator,
-    )
-
-    if req.hires_fix:
-        # Restringido a la misma zona enmascarada (ver _apply_hires_fix_to_masked_region):
-        # aplicarlo sin máscara sobre toda la imagen dejó que el refinamiento reinterpretara
-        # partes de la foto fuera de lo pedido (detectado en pruebas reales).
-        global _img2img_pipe
-        if _img2img_pipe is None:
-            _img2img_pipe = _load_img2img_pipeline()
-        image = _apply_hires_fix_to_masked_region(
-            _img2img_pipe,
-            image,
+    with _inference_lock:
+        image = _run_inpaint_cropped(
+            _inpaint_pipe,
+            input_image,
             mask_image,
             prompt=req.prompt + QUALITY_SUFFIX,
             negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+            strength=req.strength,
+            steps=req.steps,
             guidance_scale=req.guidance_scale,
             generator=generator,
         )
 
-    if req.restore_faces:
-        image, _ = restore_faces_in_image(image)
+        if req.hires_fix:
+            # Restringido a la misma zona enmascarada (ver _apply_hires_fix_to_masked_region):
+            # aplicarlo sin máscara sobre toda la imagen dejó que el refinamiento reinterpretara
+            # partes de la foto fuera de lo pedido (detectado en pruebas reales).
+            global _img2img_pipe
+            if _img2img_pipe is None:
+                _img2img_pipe = _load_img2img_pipeline()
+            image = _apply_hires_fix_to_masked_region(
+                _img2img_pipe,
+                image,
+                mask_image,
+                prompt=req.prompt + QUALITY_SUFFIX,
+                negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+                guidance_scale=req.guidance_scale,
+                generator=generator,
+            )
+
+        if req.restore_faces:
+            image, _ = restore_faces_in_image(image)
 
     if req.upscale:
         image = upscale_to_fullhd(image)
@@ -683,16 +696,17 @@ def generate_controlled(req: ControlledGenerateRequest):
 
         generator = np.random.RandomState(req.seed)
 
-    result = pipe(
-        prompt=req.prompt + QUALITY_SUFFIX,
-        negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
-        image=control_image,
-        controlnet_conditioning_scale=req.controlnet_conditioning_scale,
-        num_inference_steps=req.steps,
-        guidance_scale=req.guidance_scale,
-        generator=generator,
-    )
-    image = result.images[0]
+    with _inference_lock:
+        result = pipe(
+            prompt=req.prompt + QUALITY_SUFFIX,
+            negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+            image=control_image,
+            controlnet_conditioning_scale=req.controlnet_conditioning_scale,
+            num_inference_steps=req.steps,
+            guidance_scale=req.guidance_scale,
+            generator=generator,
+        )
+        image = result.images[0]
     if req.upscale:
         image = upscale_to_fullhd(image)
 
@@ -728,17 +742,18 @@ def generate_with_reference(req: ReferenceGenerateRequest):
 
         generator = torch.Generator().manual_seed(req.seed)
 
-    result = _ipadapter_pipe(
-        prompt=req.prompt + QUALITY_SUFFIX,
-        negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
-        ip_adapter_image=reference_image,
-        num_inference_steps=req.steps,
-        guidance_scale=req.guidance_scale,
-        width=req.width,
-        height=req.height,
-        generator=generator,
-    )
-    image = result.images[0]
+    with _inference_lock:
+        result = _ipadapter_pipe(
+            prompt=req.prompt + QUALITY_SUFFIX,
+            negative_prompt=req.negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+            ip_adapter_image=reference_image,
+            num_inference_steps=req.steps,
+            guidance_scale=req.guidance_scale,
+            width=req.width,
+            height=req.height,
+            generator=generator,
+        )
+        image = result.images[0]
     if req.upscale:
         image = upscale_to_fullhd(image)
 
