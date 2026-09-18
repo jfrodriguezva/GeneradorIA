@@ -347,7 +347,9 @@ export default function ImagenesPage() {
                 </span>
               )}
               {elapsedMs !== null && (
-                <span className={styles.meta}>{(elapsedMs / 1000).toFixed(1)}s</span>
+                <span className={styles.meta}>
+                  Tiempo de generación: {formatDuration(elapsedMs)} ({(elapsedMs / 1000).toFixed(1)}s)
+                </span>
               )}
             </div>
 
