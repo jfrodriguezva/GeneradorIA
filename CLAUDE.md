@@ -158,6 +158,22 @@ tiene GPU dedicada real.
     por esto — son notablemente más lentos que `/generate`, `/edit` e `/inpaint`. Si una versión
     futura de optimum-intel agrega ese soporte, migrar `_load_controlnet_pipeline`/
     `_load_ipadapter_pipeline` en `main.py`.
+14. **`/inpaint` en la iGPU Intel (`GENERATIVA_IMAGE_DEVICE=GPU`) crashea con el plugin GPU
+    de OpenVINO** (`clWaitForEvents`/`CL_OUT_OF_RESOURCES`) — verificado en uso real, no en
+    teoría. `/generate` sí funciona bien en GPU (ver benchmark en `CAPACIDADES.md`), pero el
+    pipeline de inpainting específicamente no. Peor: tras el primer crash, el propio log de
+    OpenVINO advierte que el contexto de la GPU queda corrupto y cualquier llamada OpenCL
+    posterior puede colgar la app — hay que reiniciar el worker completo, no solo reintentar.
+    Mientras no se investigue más a fondo (o Intel/OpenVINO lo arreglen), usar
+    `GENERATIVA_IMAGE_DEVICE=CPU` para cualquier flujo que use `/inpaint`.
+15. **Los pipelines de OpenVINO no soportan dos inferencias concurrentes** — dos requests
+    llegando casi al mismo tiempo (FastAPI corre los endpoints sync en un threadpool, así que
+    sí puede pasar con tráfico real, ej. dos pestañas del navegador) tronaban con
+    `RuntimeError: Infer Request is busy`, y en el peor caso dejaban el otro request colgado
+    indefinidamente (visto un proceso "corriendo" sin avanzar por más de 14 horas). Arreglado
+    con `_inference_lock` (`threading.Lock`) en `main.py`, que serializa el acceso — la
+    segunda llamada espera su turno en vez de chocar. No aplica a `/faceswap` (onnxruntime sí
+    soporta llamadas concurrentes).
 
 ## Instalador (`installer/`)
 

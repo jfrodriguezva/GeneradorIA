@@ -12,9 +12,12 @@ Start-Process powershell -ArgumentList @(
 
 Start-Process powershell -ArgumentList @(
   "-NoExit", "-Command",
-  # GPU = iGPU Intel vía OpenVINO. Medido en esta máquina (Core Ultra 5 135U): 6.8x más rápido
-  # que CPU a 50 pasos (867s -> 128s) sin pérdida de calidad observada. Ver docs/CAPACIDADES.md.
-  "cd '$root\worker-python'; `$env:GENERATIVA_IMAGE_DEVICE='GPU'; .\.venv-image\Scripts\python.exe image\main.py"
+  # De vuelta a CPU (era GPU): la iGPU Intel via OpenVINO es 6.8x mas rapida en /generate
+  # (867s -> 128s a 50 pasos, ver docs/CAPACIDADES.md), pero /inpaint crashea el plugin GPU
+  # (clWaitForEvents/CL_OUT_OF_RESOURCES, ver leccion aprendida #14 en CLAUDE.md) y deja el
+  # contexto de la GPU corrupto para el resto del proceso. Mejor lento que roto -- cambiar a
+  # GPU manualmente solo si vas a usar unicamente /generate en esa sesion.
+  "cd '$root\worker-python'; `$env:GENERATIVA_IMAGE_DEVICE='CPU'; .\.venv-image\Scripts\python.exe image\main.py"
 )
 
 Start-Process powershell -ArgumentList @(
