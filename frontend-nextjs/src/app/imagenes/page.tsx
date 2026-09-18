@@ -6,150 +6,127 @@ import styles from "./page.module.css";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:20000";
 
-type Mode = "generate" | "edit" | "inpaint" | "controlled" | "reference" | "faceswap";
-
-const MASK_TARGETS = {
-  ropa: "Ropa",
-  fondo: "Fondo / escenario",
-  persona: "Persona completa",
-  rostro: "Rostro y cabello",
-} as const;
-
-type MaskTargetKey = keyof typeof MASK_TARGETS;
-
-const CONTROL_TYPES = {
-  pose: "Pose (conserva la postura exacta)",
-  edges: "Bordes (conserva contornos/objetos)",
-} as const;
-
-type ControlTypeKey = keyof typeof CONTROL_TYPES;
-
 const FRAMING_PRESETS = {
   retrato: { label: "Retrato", width: 512, height: 768 },
   cuerpoCompleto: { label: "Cuerpo completo", width: 512, height: 896 },
   cuadrado: { label: "Cuadrado", width: 768, height: 768 },
   horizontal: { label: "Horizontal / paisaje", width: 896, height: 512 },
 } as const;
-
 type FramingKey = keyof typeof FRAMING_PRESETS;
+
+const MASK_TARGETS = {
+  ropa: "Ropa",
+  fondo: "Fondo / escenario",
+  rostro: "Rostro y cabello",
+} as const;
+type MaskTargetKey = keyof typeof MASK_TARGETS;
+
+const CONTROL_TYPES = {
+  pose: "Pose (conserva la postura exacta)",
+  edges: "Bordes (conserva contornos/objetos)",
+} as const;
+type ControlTypeKey = keyof typeof CONTROL_TYPES;
+
+// Cada modo mapea 1:1 a un endpoint del backend ya construido. needsImage=false
+// significa que genera desde cero (ignora la imagen activa como input directo).
+const MODES = {
+  generate: { label: "Generar desde texto", needsImage: false, needsSecondImage: false },
+  edit: { label: "Editar libre (toda la imagen)", needsImage: true, needsSecondImage: false },
+  inpaint: { label: "Cambiar zona (ropa/fondo/rostro)", needsImage: true, needsSecondImage: false },
+  controlled: { label: "Nueva escena (misma pose)", needsImage: true, needsSecondImage: false },
+  reference: { label: "Misma persona, otra escena", needsImage: true, needsSecondImage: false },
+  faceswap: { label: "Face-swap", needsImage: true, needsSecondImage: true },
+} as const;
+type Mode = keyof typeof MODES;
+
+type ImageEntry = { url: string; base64: string; label: string };
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      // quita el prefijo "data:image/png;base64,"
-      resolve(result.split(",", 2)[1]);
-    };
+    reader.onload = () => resolve((reader.result as string).split(",", 2)[1]);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
 
 export default function ImagenesPage() {
+  // La imagen "activa": lo que subiste o lo último que generaste. Cada operación
+  // exitosa la reemplaza y la empuja al historial, así se puede seguir editando la
+  // misma foto sin volver a subirla cada vez.
+  const [current, setCurrent] = useState<ImageEntry | null>(null);
+  const [history, setHistory] = useState<ImageEntry[]>([]);
+
   const [mode, setMode] = useState<Mode>("generate");
 
-  // Generar desde texto
+  // Campos compartidos entre modos
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [framing, setFraming] = useState<FramingKey>("retrato");
-
-  // Editar foto existente
-  const [sourceFile, setSourceFile] = useState<File | null>(null);
-  const [sourcePreviewUrl, setSourcePreviewUrl] = useState<string | null>(null);
-  const [editPrompt, setEditPrompt] = useState("");
   const [strength, setStrength] = useState(0.6);
-
-  // Inpainting dirigido (cambiar solo ropa / fondo / persona / rostro)
-  const [inpaintFile, setInpaintFile] = useState<File | null>(null);
-  const [inpaintPreviewUrl, setInpaintPreviewUrl] = useState<string | null>(null);
-  const [inpaintPrompt, setInpaintPrompt] = useState("");
   const [maskTarget, setMaskTarget] = useState<MaskTargetKey>("ropa");
-  const [inpaintStrength, setInpaintStrength] = useState(0.97);
-
-  // Cambiar escenario/ropa conservando pose exacta (ControlNet)
-  const [controlFile, setControlFile] = useState<File | null>(null);
-  const [controlPreviewUrl, setControlPreviewUrl] = useState<string | null>(null);
-  const [controlPrompt, setControlPrompt] = useState("");
   const [controlType, setControlType] = useState<ControlTypeKey>("pose");
-
-  // Misma persona en una escena nueva (IP-Adapter)
-  const [referenceFile, setReferenceFile] = useState<File | null>(null);
-  const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
-  const [referencePrompt, setReferencePrompt] = useState("");
   const [ipAdapterScale, setIpAdapterScale] = useState(0.6);
-
-  // Face-swap
-  const [faceSourceFile, setFaceSourceFile] = useState<File | null>(null);
-  const [faceSourcePreviewUrl, setFaceSourcePreviewUrl] = useState<string | null>(null);
-  const [faceTargetFile, setFaceTargetFile] = useState<File | null>(null);
-  const [faceTargetPreviewUrl, setFaceTargetPreviewUrl] = useState<string | null>(null);
-  const [restoreFace, setRestoreFace] = useState(true);
-
   const [upscale, setUpscale] = useState(true);
-  // Disponibles en "generar" y "editar": segunda pasada de refinamiento (más nítido,
-  // ~30-40% más lento) y GFPGAN sobre el resultado (requiere GFPGANv1.4.pth, si falta
-  // se ignora sin error).
   const [hiresFix, setHiresFix] = useState(false);
-  const [restoreFacesInResult, setRestoreFacesInResult] = useState(false);
+  const [restoreFaces, setRestoreFaces] = useState(false);
 
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isUpscaling, setIsUpscaling] = useState(false);
+  // Face-swap necesita una segunda imagen (el rostro de origen) además de la activa
+  const [secondImage, setSecondImage] = useState<ImageEntry | null>(null);
+
+  const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [resultDimensions, setResultDimensions] = useState<{ width: number; height: number } | null>(null);
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setSourceFile(file);
-    setSourcePreviewUrl(file ? URL.createObjectURL(file) : null);
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, target: "current" | "second") {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const base64 = await fileToBase64(file);
+    const entry: ImageEntry = { url: URL.createObjectURL(file), base64, label: "Subida" };
+    if (target === "current") {
+      setCurrent(entry);
+      setHistory((h) => [...h, entry]);
+    } else {
+      setSecondImage(entry);
+    }
   }
 
-  function handleInpaintFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setInpaintFile(file);
-    setInpaintPreviewUrl(file ? URL.createObjectURL(file) : null);
+  function pushResult(imageBase64: string, label: string, width?: number, height?: number) {
+    const entry: ImageEntry = {
+      url: `data:image/png;base64,${imageBase64}`,
+      base64: imageBase64,
+      label,
+    };
+    setCurrent(entry);
+    setHistory((h) => [...h, entry]);
+    setResultDimensions(width && height ? { width, height } : null);
   }
 
-  function handleControlFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setControlFile(file);
-    setControlPreviewUrl(file ? URL.createObjectURL(file) : null);
-  }
-
-  function handleReferenceFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setReferenceFile(file);
-    setReferencePreviewUrl(file ? URL.createObjectURL(file) : null);
-  }
-
-  function handleFaceSourceChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setFaceSourceFile(file);
-    setFaceSourcePreviewUrl(file ? URL.createObjectURL(file) : null);
-  }
-
-  function handleFaceTargetChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setFaceTargetFile(file);
-    setFaceTargetPreviewUrl(file ? URL.createObjectURL(file) : null);
-  }
-
-  async function generate() {
-    const trimmed = prompt.trim();
-    if (!trimmed || isGenerating) return;
+  async function run() {
+    if (isRunning) return;
+    const cfg = MODES[mode];
+    if (cfg.needsImage && !current) {
+      setError("Sube o genera una imagen primero.");
+      return;
+    }
+    if (cfg.needsSecondImage && !secondImage) {
+      setError("Face-swap necesita una segunda foto (el rostro a usar).");
+      return;
+    }
 
     setError(null);
-    setIsGenerating(true);
+    setIsRunning(true);
     const start = performance.now();
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/image/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: trimmed,
+      let endpoint = "";
+      let body: Record<string, unknown> = {};
+
+      if (mode === "generate") {
+        endpoint = "/api/image/generate";
+        body = {
+          prompt,
           negativePrompt: negativePrompt.trim() || null,
           steps: 50,
           guidanceScale: 7.5,
@@ -157,703 +134,313 @@ export default function ImagenesPage() {
           height: FRAMING_PRESETS[framing].height,
           upscale,
           hiresFix,
-          restoreFaces: restoreFacesInResult,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error ?? `El servidor respondió con estado ${response.status}`);
-      }
-
-      setImageUrl(`data:image/png;base64,${data.image_base64}`);
-      setResultDimensions(data.width && data.height ? { width: data.width, height: data.height } : null);
-      setElapsedMs(performance.now() - start);
-    } catch (err) {
-      setError((err as Error).message || "Ocurrió un error al generar la imagen.");
-    } finally {
-      setIsGenerating(false);
-    }
-  }
-
-  async function editPhoto() {
-    const trimmed = editPrompt.trim();
-    if (!trimmed || !sourceFile || isGenerating) return;
-
-    setError(null);
-    setIsGenerating(true);
-    const start = performance.now();
-
-    try {
-      const imageBase64 = await fileToBase64(sourceFile);
-
-      const response = await fetch(`${API_BASE_URL}/api/image/edit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64,
-          prompt: trimmed,
+          restoreFaces,
+        };
+      } else if (mode === "edit") {
+        endpoint = "/api/image/edit";
+        body = {
+          imageBase64: current!.base64,
+          prompt,
+          negativePrompt: negativePrompt.trim() || null,
           strength,
           steps: 50,
           guidanceScale: 7.5,
           upscale,
           hiresFix,
-          restoreFaces: restoreFacesInResult,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error ?? `El servidor respondió con estado ${response.status}`);
-      }
-
-      setImageUrl(`data:image/png;base64,${data.image_base64}`);
-      setResultDimensions(data.width && data.height ? { width: data.width, height: data.height } : null);
-      setElapsedMs(performance.now() - start);
-    } catch (err) {
-      setError((err as Error).message || "Ocurrió un error al editar la imagen.");
-    } finally {
-      setIsGenerating(false);
-    }
-  }
-
-  async function inpaint() {
-    const trimmed = inpaintPrompt.trim();
-    if (!trimmed || !inpaintFile || isGenerating) return;
-
-    setError(null);
-    setIsGenerating(true);
-    const start = performance.now();
-
-    try {
-      const imageBase64 = await fileToBase64(inpaintFile);
-
-      const response = await fetch(`${API_BASE_URL}/api/image/inpaint`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64,
-          prompt: trimmed,
+          restoreFaces,
+        };
+      } else if (mode === "inpaint") {
+        endpoint = "/api/image/inpaint";
+        body = {
+          imageBase64: current!.base64,
+          prompt,
+          negativePrompt: negativePrompt.trim() || null,
           maskTarget,
-          strength: inpaintStrength,
+          strength: 0.9,
           steps: 50,
           guidanceScale: 7.5,
           upscale,
           hiresFix,
-          restoreFaces: restoreFacesInResult,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.detail ?? data?.error ?? `El servidor respondió con estado ${response.status}`);
-      }
-
-      setImageUrl(`data:image/png;base64,${data.image_base64}`);
-      setResultDimensions(data.width && data.height ? { width: data.width, height: data.height } : null);
-      setElapsedMs(performance.now() - start);
-    } catch (err) {
-      setError((err as Error).message || "Ocurrió un error al editar la imagen.");
-    } finally {
-      setIsGenerating(false);
-    }
-  }
-
-  async function generateControlled() {
-    const trimmed = controlPrompt.trim();
-    if (!trimmed || !controlFile || isGenerating) return;
-
-    setError(null);
-    setIsGenerating(true);
-    const start = performance.now();
-
-    try {
-      const referenceImageBase64 = await fileToBase64(controlFile);
-
-      const response = await fetch(`${API_BASE_URL}/api/image/generate-controlled`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          referenceImageBase64,
+          restoreFaces,
+        };
+      } else if (mode === "controlled") {
+        endpoint = "/api/image/generate-controlled";
+        body = {
+          referenceImageBase64: current!.base64,
           controlType,
-          prompt: trimmed,
+          prompt,
+          negativePrompt: negativePrompt.trim() || null,
+          controlnetConditioningScale: 1.0,
           steps: 50,
           guidanceScale: 7.5,
           upscale,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.detail ?? data?.error ?? `El servidor respondió con estado ${response.status}`);
-      }
-
-      setImageUrl(`data:image/png;base64,${data.image_base64}`);
-      setResultDimensions(data.width && data.height ? { width: data.width, height: data.height } : null);
-      setElapsedMs(performance.now() - start);
-    } catch (err) {
-      setError((err as Error).message || "Ocurrió un error al generar la imagen.");
-    } finally {
-      setIsGenerating(false);
-    }
-  }
-
-  async function generateWithReference() {
-    const trimmed = referencePrompt.trim();
-    if (!trimmed || !referenceFile || isGenerating) return;
-
-    setError(null);
-    setIsGenerating(true);
-    const start = performance.now();
-
-    try {
-      const referenceImageBase64 = await fileToBase64(referenceFile);
-
-      const response = await fetch(`${API_BASE_URL}/api/image/generate-with-reference`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          referenceImageBase64,
-          prompt: trimmed,
+        };
+      } else if (mode === "reference") {
+        endpoint = "/api/image/generate-with-reference";
+        body = {
+          referenceImageBase64: current!.base64,
+          prompt,
+          negativePrompt: negativePrompt.trim() || null,
           ipAdapterScale,
           steps: 30,
           guidanceScale: 7.5,
           width: FRAMING_PRESETS[framing].width,
           height: FRAMING_PRESETS[framing].height,
           upscale,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.detail ?? data?.error ?? `El servidor respondió con estado ${response.status}`);
+        };
+      } else if (mode === "faceswap") {
+        endpoint = "/api/image/faceswap";
+        body = {
+          sourceImageBase64: secondImage!.base64,
+          targetImageBase64: current!.base64,
+          restoreFace: restoreFaces,
+        };
       }
 
-      setImageUrl(`data:image/png;base64,${data.image_base64}`);
-      setResultDimensions(data.width && data.height ? { width: data.width, height: data.height } : null);
-      setElapsedMs(performance.now() - start);
-    } catch (err) {
-      setError((err as Error).message || "Ocurrió un error al generar la imagen.");
-    } finally {
-      setIsGenerating(false);
-    }
-  }
-
-  async function faceSwap() {
-    if (!faceSourceFile || !faceTargetFile || isGenerating) return;
-
-    setError(null);
-    setIsGenerating(true);
-    const start = performance.now();
-
-    try {
-      const [sourceImageBase64, targetImageBase64] = await Promise.all([
-        fileToBase64(faceSourceFile),
-        fileToBase64(faceTargetFile),
-      ]);
-
-      const response = await fetch(`${API_BASE_URL}/api/image/faceswap`, {
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceImageBase64, targetImageBase64, restoreFace }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data?.detail ?? data?.error ?? `El servidor respondió con estado ${response.status}`);
+        throw new Error(data?.error ?? data?.detail ?? `El servidor respondió con estado ${response.status}`);
       }
 
-      setImageUrl(`data:image/png;base64,${data.image_base64}`);
+      pushResult(data.image_base64, MODES[mode].label, data.width, data.height);
       setElapsedMs(performance.now() - start);
     } catch (err) {
-      setError((err as Error).message || "Ocurrió un error al intercambiar el rostro.");
+      setError((err as Error).message || "Ocurrió un error.");
     } finally {
-      setIsGenerating(false);
+      setIsRunning(false);
     }
   }
 
-  async function upscaleResult() {
-    if (!imageUrl || isUpscaling) return;
+  async function upscaleCurrent() {
+    if (!current || isRunning) return;
     setError(null);
-    setIsUpscaling(true);
-
+    setIsRunning(true);
     try {
-      const imageBase64 = imageUrl.split(",", 2)[1];
       const response = await fetch(`${API_BASE_URL}/api/image/upscale`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64 }),
+        body: JSON.stringify({ imageBase64: current.base64 }),
       });
-
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.detail ?? data?.error ?? `El servidor respondió con estado ${response.status}`);
-      }
-
-      setImageUrl(`data:image/png;base64,${data.image_base64}`);
-      setResultDimensions(data.width && data.height ? { width: data.width, height: data.height } : null);
+      if (!response.ok) throw new Error(data?.error ?? data?.detail ?? "Error al escalar.");
+      pushResult(data.image_base64, "Escalado a Full HD", data.width, data.height);
     } catch (err) {
-      setError((err as Error).message || "Ocurrió un error al escalar la imagen.");
+      setError((err as Error).message || "Ocurrió un error al escalar.");
     } finally {
-      setIsUpscaling(false);
+      setIsRunning(false);
     }
   }
+
+  const cfg = MODES[mode];
+  const canRun =
+    prompt.trim().length > 0 || mode === "faceswap"
+      ? (!cfg.needsImage || !!current) && (!cfg.needsSecondImage || !!secondImage)
+      : false;
 
   return (
     <div className={styles.page}>
       <main className={styles.main}>
         <h1 className={styles.title}>Generativa — Imágenes</h1>
+        <p className={styles.hint}>
+          Sube o genera una imagen una sola vez; cada resultado se convierte en la base del
+          siguiente paso, sin volver a subir nada. Usa el historial de abajo para regresar a
+          cualquier versión anterior.
+        </p>
 
-        <div className={styles.tabs}>
-          <button
-            className={`${styles.tab} ${mode === "generate" ? styles.tabActive : ""}`}
-            onClick={() => setMode("generate")}
-          >
-            Generar desde texto
-          </button>
-          <button
-            className={`${styles.tab} ${mode === "edit" ? styles.tabActive : ""}`}
-            onClick={() => setMode("edit")}
-          >
-            Editar una foto
-          </button>
-          <button
-            className={`${styles.tab} ${mode === "inpaint" ? styles.tabActive : ""}`}
-            onClick={() => setMode("inpaint")}
-          >
-            Cambiar ropa / fondo
-          </button>
-          <button
-            className={`${styles.tab} ${mode === "controlled" ? styles.tabActive : ""}`}
-            onClick={() => setMode("controlled")}
-          >
-            Nueva escena (misma pose)
-          </button>
-          <button
-            className={`${styles.tab} ${mode === "reference" ? styles.tabActive : ""}`}
-            onClick={() => setMode("reference")}
-          >
-            Misma persona, otra escena
-          </button>
-          <button
-            className={`${styles.tab} ${mode === "faceswap" ? styles.tabActive : ""}`}
-            onClick={() => setMode("faceswap")}
-          >
-            Face-swap
-          </button>
+        <div className={styles.workspace}>
+          {/* Lienzo: imagen activa + subir + historial */}
+          <div className={styles.canvas}>
+            <div className={styles.canvasImageWrap}>
+              {current ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={current.url} alt="Imagen activa" />
+              ) : (
+                <span className={styles.canvasEmpty}>
+                  Sube una imagen o genera una desde texto para empezar.
+                </span>
+              )}
+            </div>
+
+            <div className={styles.canvasActions}>
+              <label className={styles.uploadButton}>
+                Subir imagen
+                <input type="file" accept="image/*" onChange={(e) => handleUpload(e, "current")} />
+              </label>
+              {current && (
+                <button className={styles.smallButton} onClick={upscaleCurrent} disabled={isRunning}>
+                  Escalar a Full HD
+                </button>
+              )}
+              {resultDimensions && (
+                <span className={styles.meta}>
+                  {resultDimensions.width}×{resultDimensions.height}px
+                </span>
+              )}
+              {elapsedMs !== null && (
+                <span className={styles.meta}>{(elapsedMs / 1000).toFixed(1)}s</span>
+              )}
+            </div>
+
+            {history.length > 1 && (
+              <div className={styles.historyStrip}>
+                {history.map((h, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={i}
+                    src={h.url}
+                    alt={h.label}
+                    title={h.label}
+                    className={`${styles.historyThumb} ${h.url === current?.url ? styles.historyThumbActive : ""}`}
+                    onClick={() => setCurrent(h)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Selector de qué hacer */}
+          <div className={styles.modeGrid}>
+            {Object.entries(MODES).map(([key, m]) => (
+              <button
+                key={key}
+                className={`${styles.modeCard} ${mode === key ? styles.modeCardActive : ""}`}
+                onClick={() => setMode(key as Mode)}
+                disabled={m.needsImage && !current && key !== mode}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Formulario dinámico según el modo */}
+          <div className={styles.form}>
+            {mode === "faceswap" ? (
+              <label className={styles.label}>
+                Foto con el rostro que quieres usar
+                <input type="file" accept="image/*" onChange={(e) => handleUpload(e, "second")} />
+                {secondImage && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={secondImage.url} alt="Rostro origen" className={styles.sourcePreview} />
+                )}
+              </label>
+            ) : (
+              <>
+                <label className={styles.label}>
+                  Describe lo que quieres
+                  <textarea
+                    className={styles.textarea}
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder={
+                      mode === "generate"
+                        ? "Un zorro rojo en un bosque nevado, estilo pintura digital"
+                        : mode === "inpaint"
+                          ? "vestido rojo, tela satinada"
+                          : "la misma persona en una playa al atardecer"
+                    }
+                    rows={3}
+                  />
+                </label>
+                <label className={styles.label}>
+                  Prompt negativo (opcional)
+                  <input
+                    className={styles.input}
+                    value={negativePrompt}
+                    onChange={(e) => setNegativePrompt(e.target.value)}
+                    placeholder="borroso, baja calidad, deformado"
+                  />
+                </label>
+              </>
+            )}
+
+            {(mode === "generate" || mode === "reference") && (
+              <label className={styles.label}>
+                Encuadre
+                <select className={styles.input} value={framing} onChange={(e) => setFraming(e.target.value as FramingKey)}>
+                  {Object.entries(FRAMING_PRESETS).map(([key, p]) => (
+                    <option key={key} value={key}>
+                      {p.label} ({p.width}×{p.height})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {mode === "edit" && (
+              <label className={styles.label}>
+                Intensidad del cambio: {strength.toFixed(2)}
+                <input type="range" min={0.2} max={0.9} step={0.05} value={strength} onChange={(e) => setStrength(Number(e.target.value))} />
+                <span className={styles.hint}>Bajo = se parece más a la foto original. Alto = cambia más.</span>
+              </label>
+            )}
+
+            {mode === "inpaint" && (
+              <label className={styles.label}>
+                Qué zona cambiar
+                <select className={styles.input} value={maskTarget} onChange={(e) => setMaskTarget(e.target.value as MaskTargetKey)}>
+                  {Object.entries(MASK_TARGETS).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <span className={styles.hint}>La zona se detecta sola; el resto de la imagen queda intacto.</span>
+              </label>
+            )}
+
+            {mode === "controlled" && (
+              <label className={styles.label}>
+                Qué conservar de la imagen activa
+                <select className={styles.input} value={controlType} onChange={(e) => setControlType(e.target.value as ControlTypeKey)}>
+                  {Object.entries(CONTROL_TYPES).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <span className={styles.hint}>No conserva el rostro — combina después con face-swap si lo necesitas.</span>
+              </label>
+            )}
+
+            {mode === "reference" && (
+              <label className={styles.label}>
+                Parecido a la imagen activa: {ipAdapterScale.toFixed(2)}
+                <input type="range" min={0.2} max={1.0} step={0.05} value={ipAdapterScale} onChange={(e) => setIpAdapterScale(Number(e.target.value))} />
+              </label>
+            )}
+
+            <div className={styles.fieldsRow}>
+              {mode !== "faceswap" && mode !== "controlled" && mode !== "reference" && (
+                <label className={styles.checkboxLabel}>
+                  <input type="checkbox" checked={hiresFix} onChange={(e) => setHiresFix(e.target.checked)} />
+                  Refinamiento extra
+                </label>
+              )}
+              <label className={styles.checkboxLabel}>
+                <input type="checkbox" checked={restoreFaces} onChange={(e) => setRestoreFaces(e.target.checked)} />
+                Pulir rostro (GFPGAN)
+              </label>
+              {mode !== "faceswap" && (
+                <label className={styles.checkboxLabel}>
+                  <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
+                  Escalar a Full HD
+                </label>
+              )}
+            </div>
+
+            <button className={styles.button} onClick={run} disabled={isRunning || !canRun}>
+              {isRunning ? "Procesando… (puede tardar varios minutos en CPU)" : MODES[mode].label}
+            </button>
+          </div>
         </div>
-
-        {mode === "generate" && (
-          <div className={styles.form}>
-            <label className={styles.label}>
-              Prompt
-              <textarea
-                className={styles.textarea}
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Un zorro rojo en un bosque nevado, estilo pintura digital"
-                rows={3}
-              />
-            </label>
-
-            <label className={styles.label}>
-              Prompt negativo (opcional)
-              <input
-                className={styles.input}
-                value={negativePrompt}
-                onChange={(e) => setNegativePrompt(e.target.value)}
-                placeholder="borroso, baja calidad, deformado"
-              />
-            </label>
-
-            <label className={styles.label}>
-              Encuadre
-              <select
-                className={styles.input}
-                value={framing}
-                onChange={(e) => setFraming(e.target.value as FramingKey)}
-              >
-                {Object.entries(FRAMING_PRESETS).map(([key, preset]) => (
-                  <option key={key} value={key}>
-                    {preset.label} ({preset.width}×{preset.height})
-                  </option>
-                ))}
-              </select>
-              <span className={styles.hint}>
-                Para cuerpo completo, describe en el prompt que quieres ver a la persona de pies a cabeza.
-              </span>
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
-              Escalar a Full HD
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={hiresFix} onChange={(e) => setHiresFix(e.target.checked)} />
-              Refinamiento extra (más nítido, ~30-40% más lento)
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={restoreFacesInResult}
-                onChange={(e) => setRestoreFacesInResult(e.target.checked)}
-              />
-              Pulir rostro (GFPGAN, requiere GFPGANv1.4.pth)
-            </label>
-
-            <button
-              className={styles.button}
-              onClick={generate}
-              disabled={isGenerating || !prompt.trim()}
-            >
-              {isGenerating ? "Generando a máxima calidad… (~15-20 min en CPU)" : "Generar imagen (máxima calidad)"}
-            </button>
-          </div>
-        )}
-
-        {mode === "edit" && (
-          <div className={styles.form}>
-            <label className={styles.label}>
-              Foto a editar
-              <input type="file" accept="image/*" onChange={handleFileChange} />
-            </label>
-
-            {sourcePreviewUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={sourcePreviewUrl} alt="Foto original" className={styles.sourcePreview} />
-            )}
-
-            <label className={styles.label}>
-              Describe el cambio
-              <textarea
-                className={styles.textarea}
-                value={editPrompt}
-                onChange={(e) => setEditPrompt(e.target.value)}
-                placeholder="la misma persona vestida de charro mexicano, sombrero, traje tradicional"
-                rows={3}
-              />
-            </label>
-
-            <label className={styles.label}>
-              Intensidad del cambio: {strength.toFixed(2)}
-              <input
-                type="range"
-                min={0.2}
-                max={0.9}
-                step={0.05}
-                value={strength}
-                onChange={(e) => setStrength(Number(e.target.value))}
-              />
-              <span className={styles.hint}>
-                Bajo = se parece más a la foto original. Alto = cambia más, pero puede perder el parecido.
-              </span>
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
-              Escalar a Full HD
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={hiresFix} onChange={(e) => setHiresFix(e.target.checked)} />
-              Refinamiento extra (más nítido, ~30-40% más lento)
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={restoreFacesInResult}
-                onChange={(e) => setRestoreFacesInResult(e.target.checked)}
-              />
-              Pulir rostro (GFPGAN, requiere GFPGANv1.4.pth)
-            </label>
-
-            <button
-              className={styles.button}
-              onClick={editPhoto}
-              disabled={isGenerating || !editPrompt.trim() || !sourceFile}
-            >
-              {isGenerating ? "Editando a máxima calidad… (~15-20 min en CPU)" : "Editar imagen (máxima calidad)"}
-            </button>
-          </div>
-        )}
-
-        {mode === "inpaint" && (
-          <div className={styles.form}>
-            <label className={styles.label}>
-              Foto a editar
-              <input type="file" accept="image/*" onChange={handleInpaintFileChange} />
-            </label>
-
-            {inpaintPreviewUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={inpaintPreviewUrl} alt="Foto original" className={styles.sourcePreview} />
-            )}
-
-            <label className={styles.label}>
-              Qué zona cambiar
-              <select
-                className={styles.input}
-                value={maskTarget}
-                onChange={(e) => setMaskTarget(e.target.value as MaskTargetKey)}
-              >
-                {Object.entries(MASK_TARGETS).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <span className={styles.hint}>
-                La zona se detecta sola (segmentación); el resto de la imagen queda intacto.
-              </span>
-            </label>
-
-            <label className={styles.label}>
-              Describe el resultado que quieres en esa zona
-              <textarea
-                className={styles.textarea}
-                value={inpaintPrompt}
-                onChange={(e) => setInpaintPrompt(e.target.value)}
-                placeholder="vestido rojo de gala, tela satinada"
-                rows={3}
-              />
-            </label>
-
-            <label className={styles.label}>
-              Intensidad del cambio: {inpaintStrength.toFixed(2)}
-              <input
-                type="range"
-                min={0.6}
-                max={1.0}
-                step={0.05}
-                value={inpaintStrength}
-                onChange={(e) => setInpaintStrength(Number(e.target.value))}
-              />
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
-              Escalar a Full HD
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={hiresFix} onChange={(e) => setHiresFix(e.target.checked)} />
-              Refinamiento extra (más nítido, ~30-40% más lento)
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={restoreFacesInResult}
-                onChange={(e) => setRestoreFacesInResult(e.target.checked)}
-              />
-              Pulir rostro (GFPGAN, requiere GFPGANv1.4.pth)
-            </label>
-
-            <button
-              className={styles.button}
-              onClick={inpaint}
-              disabled={isGenerating || !inpaintPrompt.trim() || !inpaintFile}
-            >
-              {isGenerating ? "Editando a máxima calidad… (~10-15 min en CPU)" : "Aplicar cambio dirigido"}
-            </button>
-          </div>
-        )}
-
-        {mode === "controlled" && (
-          <div className={styles.form}>
-            <label className={styles.label}>
-              Foto de referencia (se conserva la pose/contornos, no el contenido)
-              <input type="file" accept="image/*" onChange={handleControlFileChange} />
-            </label>
-
-            {controlPreviewUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={controlPreviewUrl} alt="Foto de referencia" className={styles.sourcePreview} />
-            )}
-
-            <label className={styles.label}>
-              Qué conservar de la referencia
-              <select
-                className={styles.input}
-                value={controlType}
-                onChange={(e) => setControlType(e.target.value as ControlTypeKey)}
-              >
-                {Object.entries(CONTROL_TYPES).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className={styles.label}>
-              Describe la escena/ropa nueva
-              <textarea
-                className={styles.textarea}
-                value={controlPrompt}
-                onChange={(e) => setControlPrompt(e.target.value)}
-                placeholder="la misma persona en una playa al atardecer, vestido blanco de lino"
-                rows={3}
-              />
-              <span className={styles.hint}>
-                Conserva la pose exacta de la referencia; no conserva el rostro — combina con
-                face-swap después si necesitas que sea la misma cara.
-              </span>
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
-              Escalar a Full HD
-            </label>
-
-            <button
-              className={styles.button}
-              onClick={generateControlled}
-              disabled={isGenerating || !controlPrompt.trim() || !controlFile}
-            >
-              {isGenerating ? "Generando a máxima calidad… (~15-20 min en CPU)" : "Generar escena nueva"}
-            </button>
-          </div>
-        )}
-
-        {mode === "reference" && (
-          <div className={styles.form}>
-            <label className={styles.label}>
-              Foto de referencia de la persona (rostro visible)
-              <input type="file" accept="image/*" onChange={handleReferenceFileChange} />
-            </label>
-
-            {referencePreviewUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={referencePreviewUrl} alt="Foto de referencia" className={styles.sourcePreview} />
-            )}
-
-            <label className={styles.label}>
-              Describe la escena nueva
-              <textarea
-                className={styles.textarea}
-                value={referencePrompt}
-                onChange={(e) => setReferencePrompt(e.target.value)}
-                placeholder="la misma persona caminando por una calle de París, otoño"
-                rows={3}
-              />
-            </label>
-
-            <label className={styles.label}>
-              Encuadre
-              <select
-                className={styles.input}
-                value={framing}
-                onChange={(e) => setFraming(e.target.value as FramingKey)}
-              >
-                {Object.entries(FRAMING_PRESETS).map(([key, preset]) => (
-                  <option key={key} value={key}>
-                    {preset.label} ({preset.width}×{preset.height})
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className={styles.label}>
-              Parecido a la referencia: {ipAdapterScale.toFixed(2)}
-              <input
-                type="range"
-                min={0.2}
-                max={1.0}
-                step={0.05}
-                value={ipAdapterScale}
-                onChange={(e) => setIpAdapterScale(Number(e.target.value))}
-              />
-              <span className={styles.hint}>
-                Alto = se parece más a la referencia. Bajo = más libertad en la escena, menos parecido.
-              </span>
-            </label>
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={upscale} onChange={(e) => setUpscale(e.target.checked)} />
-              Escalar a Full HD
-            </label>
-
-            <button
-              className={styles.button}
-              onClick={generateWithReference}
-              disabled={isGenerating || !referencePrompt.trim() || !referenceFile}
-            >
-              {isGenerating ? "Generando… (más lento, no usa aceleración OpenVINO)" : "Generar con esa identidad"}
-            </button>
-          </div>
-        )}
-
-        {mode === "faceswap" && (
-          <div className={styles.form}>
-            <label className={styles.label}>
-              Foto con el rostro que quieres usar
-              <input type="file" accept="image/*" onChange={handleFaceSourceChange} />
-            </label>
-            {faceSourcePreviewUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={faceSourcePreviewUrl} alt="Rostro origen" className={styles.sourcePreview} />
-            )}
-
-            <label className={styles.label}>
-              Foto donde quieres colocar ese rostro
-              <input type="file" accept="image/*" onChange={handleFaceTargetChange} />
-            </label>
-            {faceTargetPreviewUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={faceTargetPreviewUrl} alt="Foto destino" className={styles.sourcePreview} />
-            )}
-
-            <label className={styles.checkboxLabel}>
-              <input type="checkbox" checked={restoreFace} onChange={(e) => setRestoreFace(e.target.checked)} />
-              Restaurar iluminación/textura del rostro (GFPGAN)
-            </label>
-
-            <button
-              className={styles.button}
-              onClick={faceSwap}
-              disabled={isGenerating || !faceSourceFile || !faceTargetFile}
-            >
-              {isGenerating ? "Intercambiando rostro… (unos segundos)" : "Intercambiar rostro"}
-            </button>
-          </div>
-        )}
 
         {error && <p className={styles.error}>{error}</p>}
-
-        <div className={styles.resultBox}>
-          {imageUrl ? (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={imageUrl} alt="Resultado" className={styles.image} />
-              <div className={styles.resultMetaRow}>
-                {elapsedMs !== null && (
-                  <span className={styles.meta}>Generada en {(elapsedMs / 1000).toFixed(1)}s</span>
-                )}
-                {resultDimensions && (
-                  <span className={styles.meta}>
-                    {resultDimensions.width}×{resultDimensions.height}px
-                  </span>
-                )}
-                <button className={styles.smallButton} onClick={upscaleResult} disabled={isUpscaling}>
-                  {isUpscaling ? "Escalando…" : "Escalar a Full HD"}
-                </button>
-              </div>
-            </>
-          ) : (
-            <p className={styles.placeholder}>El resultado aparecerá aquí.</p>
-          )}
-        </div>
       </main>
     </div>
   );
