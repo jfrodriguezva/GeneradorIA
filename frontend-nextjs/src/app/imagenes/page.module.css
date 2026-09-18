@@ -183,7 +183,20 @@
 .workspace {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
+}
+
+.sectionTitle {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  margin: 8px 0 0;
+}
+
+.sectionTitle:first-child {
+  margin-top: 0;
 }
 
 .canvas {
@@ -219,6 +232,35 @@
   font-size: 13px;
   text-align: center;
   padding: 24px;
+}
+
+.processingOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(15, 17, 21, 0.82);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.processingSpinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .canvasActions {

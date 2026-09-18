@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./page.module.css";
 
 const API_BASE_URL =
@@ -30,14 +30,51 @@ type ControlTypeKey = keyof typeof CONTROL_TYPES;
 // Cada modo mapea 1:1 a un endpoint del backend ya construido. needsImage=false
 // significa que genera desde cero (ignora la imagen activa como input directo).
 const MODES = {
-  generate: { label: "Generar desde texto", needsImage: false, needsSecondImage: false },
-  edit: { label: "Editar libre (toda la imagen)", needsImage: true, needsSecondImage: false },
-  inpaint: { label: "Cambiar zona (ropa/fondo/rostro)", needsImage: true, needsSecondImage: false },
-  controlled: { label: "Nueva escena (misma pose)", needsImage: true, needsSecondImage: false },
-  reference: { label: "Misma persona, otra escena", needsImage: true, needsSecondImage: false },
-  faceswap: { label: "Face-swap", needsImage: true, needsSecondImage: true },
+  generate: {
+    label: "Generar desde texto",
+    hint: "Crea una imagen nueva desde cero, sin partir de ninguna foto.",
+    needsImage: false,
+    needsSecondImage: false,
+  },
+  edit: {
+    label: "Editar libre",
+    hint: "Cambia el estilo o detalles de toda la foto activa a la vez.",
+    needsImage: true,
+    needsSecondImage: false,
+  },
+  inpaint: {
+    label: "Cambiar ropa / fondo / rostro",
+    hint: "Edita solo una zona (se detecta sola); el resto queda intacto.",
+    needsImage: true,
+    needsSecondImage: false,
+  },
+  controlled: {
+    label: "Nueva escena, misma pose",
+    hint: "Cambia el escenario/ropa conservando la postura exacta. No conserva la cara.",
+    needsImage: true,
+    needsSecondImage: false,
+  },
+  reference: {
+    label: "Misma persona, otra escena",
+    hint: "Genera una escena nueva pareciéndose a la persona de la foto activa.",
+    needsImage: true,
+    needsSecondImage: false,
+  },
+  faceswap: {
+    label: "Face-swap",
+    hint: "Coloca el rostro de otra foto sobre la persona de la foto activa.",
+    needsImage: true,
+    needsSecondImage: true,
+  },
 } as const;
 type Mode = keyof typeof MODES;
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
 
 type ImageEntry = { url: string; base64: string; label: string };
 
@@ -79,6 +116,22 @@ export default function ImagenesPage() {
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [resultDimensions, setResultDimensions] = useState<{ width: number; height: number } | null>(null);
 
+  // Cronómetro en vivo mientras corre una operación: no hay progreso real que reportar
+  // (el worker no manda avance parcial), pero saber cuánto tiempo lleva corriendo es
+  // mejor que un texto estático fijo mientras se espera varios minutos en CPU.
+  const [runningMs, setRunningMs] = useState(0);
+  const runStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const interval = setInterval(() => {
+      if (runStartRef.current !== null) {
+        setRunningMs(performance.now() - runStartRef.current);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isRunning]);
+
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>, target: "current" | "second") {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -118,6 +171,8 @@ export default function ImagenesPage() {
     setError(null);
     setIsRunning(true);
     const start = performance.now();
+    runStartRef.current = start;
+    setRunningMs(0);
 
     try {
       let endpoint = "";
@@ -221,6 +276,8 @@ export default function ImagenesPage() {
     if (!current || isRunning) return;
     setError(null);
     setIsRunning(true);
+    runStartRef.current = performance.now();
+    setRunningMs(0);
     try {
       const response = await fetch(`${API_BASE_URL}/api/image/upscale`, {
         method: "POST",
@@ -255,6 +312,7 @@ export default function ImagenesPage() {
 
         <div className={styles.workspace}>
           {/* Lienzo: imagen activa + subir + historial */}
+          <p className={styles.sectionTitle}>1. Tu imagen</p>
           <div className={styles.canvas}>
             <div className={styles.canvasImageWrap}>
               {current ? (
@@ -264,6 +322,12 @@ export default function ImagenesPage() {
                 <span className={styles.canvasEmpty}>
                   Sube una imagen o genera una desde texto para empezar.
                 </span>
+              )}
+              {isRunning && (
+                <div className={styles.processingOverlay}>
+                  <span className={styles.processingSpinner} />
+                  <span>Generando… {formatDuration(runningMs)}</span>
+                </div>
               )}
             </div>
 
@@ -305,6 +369,7 @@ export default function ImagenesPage() {
           </div>
 
           {/* Selector de qué hacer */}
+          <p className={styles.sectionTitle}>2. Qué quieres hacer</p>
           <div className={styles.modeGrid}>
             {Object.entries(MODES).map(([key, m]) => (
               <button
@@ -312,13 +377,16 @@ export default function ImagenesPage() {
                 className={`${styles.modeCard} ${mode === key ? styles.modeCardActive : ""}`}
                 onClick={() => setMode(key as Mode)}
                 disabled={m.needsImage && !current && key !== mode}
+                title={m.hint}
               >
                 {m.label}
               </button>
             ))}
           </div>
+          <p className={styles.hint}>{MODES[mode].hint}</p>
 
           {/* Formulario dinámico según el modo */}
+          <p className={styles.sectionTitle}>3. Detalles</p>
           <div className={styles.form}>
             {mode === "faceswap" ? (
               <label className={styles.label}>
@@ -435,7 +503,7 @@ export default function ImagenesPage() {
             </div>
 
             <button className={styles.button} onClick={run} disabled={isRunning || !canRun}>
-              {isRunning ? "Procesando… (puede tardar varios minutos en CPU)" : MODES[mode].label}
+              {isRunning ? `Procesando… ${formatDuration(runningMs)} (puede tardar varios minutos en CPU)` : MODES[mode].label}
             </button>
           </div>
         </div>
