@@ -52,6 +52,13 @@ Source: "{#RepoRoot}worker-python\chat\*"; DestDir: "{app}\worker-python\chat"; 
 Source: "{#RepoRoot}worker-python\image\main.py"; DestDir: "{app}\worker-python\image"; Flags: ignoreversion
 Source: "{#RepoRoot}worker-python\image\faceswap.py"; DestDir: "{app}\worker-python\image"; Flags: ignoreversion
 Source: "{#RepoRoot}worker-python\image\upscale.py"; DestDir: "{app}\worker-python\image"; Flags: ignoreversion
+; segmentation.py (mascaras automaticas para /inpaint) y controlnet.py (extraccion de
+; pose/bordes para /generate-controlled) -- faltaban en el instalador; main.py los
+; importa directo, sin ellos el worker de imagenes crashea al arrancar en una maquina
+; limpia. Encontrado al intentar compilar el instalador esta sesion, nunca se habia
+; corrido de punta a punta desde que se agregaron estas funciones.
+Source: "{#RepoRoot}worker-python\image\segmentation.py"; DestDir: "{app}\worker-python\image"; Flags: ignoreversion
+Source: "{#RepoRoot}worker-python\image\controlnet.py"; DestDir: "{app}\worker-python\image"; Flags: ignoreversion
 Source: "{#RepoRoot}worker-python\image\requirements.txt"; DestDir: "{app}\worker-python\image"; Flags: ignoreversion
 
 ; Script que instala Python/Node.js si faltan y arma los entornos virtuales.
@@ -59,7 +66,12 @@ Source: "setup-environment.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Modelos ya descargados/convertidos (son datos, sí son portables entre máquinas).
 Source: "{#RepoRoot}worker-python\models\*"; DestDir: "{app}\worker-python\models"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#RepoRoot}worker-python\image\ov-models\Realistic_Vision_V5.1_noVAE\*"; DestDir: "{app}\worker-python\image\ov-models\Realistic_Vision_V5.1_noVAE"; Flags: ignoreversion recursesubdirs createallsubdirs
+; epiCRealism (default actual del worker de imagenes, ver GENERATIVA_IMAGE_MODEL_ID en
+; main.py) -- antes apuntaba a Realistic_Vision_V5.1_noVAE, el checkpoint anterior, que
+; ya no existe en este equipo (se eliminó al cambiar el default esta sesión). Si esto no
+; se corrige, la ruta no existe y la compilación del instalador falla directamente
+; ("No files found matching").
+Source: "{#RepoRoot}worker-python\image\ov-models\epiCRealism\*"; DestDir: "{app}\worker-python\image\ov-models\epiCRealism"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Modelos de face-swap (InsightFace buffalo_l + inswapper) y de escalado a Full HD.
 Source: "{#RepoRoot}worker-python\faceswap-models\*"; DestDir: "{app}\worker-python\faceswap-models"; Flags: ignoreversion recursesubdirs createallsubdirs
