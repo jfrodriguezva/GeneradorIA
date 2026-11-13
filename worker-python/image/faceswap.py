@@ -9,6 +9,10 @@ import base64
 import io
 import os
 
+# PyTorch 2.6+ cambió el default de torch.load a weights_only=True, lo que rompe
+# checkpoints clásicos de gfpgan/facexlib. Esta variable restaura el comportamiento compatible.
+os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+
 import cv2
 import numpy as np
 from fastapi import HTTPException
@@ -116,15 +120,20 @@ def _load_restorer():
 def restore_faces_in_image(pil_image: Image.Image) -> tuple[Image.Image, bool]:
     """Pasa GFPGAN sobre cualquier imagen (no solo resultado de face-swap) para pulir
     rostros generados: piel, ojos, dientes. Devuelve (imagen, si_se_aplico) — si no está
-    el modelo descargado, devuelve la imagen sin cambios y False, sin dar error."""
-    restorer = _load_restorer()
-    if restorer is None:
-        return pil_image, False
+    el modelo descargado o falla una dependencia opcional, devuelve la imagen sin cambios
+    y False, sin abortar la generación."""
+    try:
+        restorer = _load_restorer()
+        if restorer is None:
+            return pil_image, False
 
-    bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
-    _, _, restored_bgr = restorer.enhance(bgr, has_aligned=False, only_center_face=False, paste_back=True)
-    restored_rgb = cv2.cvtColor(restored_bgr, cv2.COLOR_BGR2RGB)
-    return Image.fromarray(restored_rgb), True
+        bgr = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
+        _, _, restored_bgr = restorer.enhance(bgr, has_aligned=False, only_center_face=False, paste_back=True)
+        restored_rgb = cv2.cvtColor(restored_bgr, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(restored_rgb), True
+    except Exception as exc:
+        print(f"[faceswap] Aviso: fallo en restauración facial GFPGAN ({exc}), se devuelve imagen sin restaurar.")
+        return pil_image, False
 
 
 def _decode_image(image_base64: str):

@@ -38,8 +38,12 @@ def post_json(base_url: str, path: str, payload: dict, timeout: int = 1800) -> t
         method="POST",
     )
     t0 = time.perf_counter()
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code} en {path}: {err_body}") from exc
     elapsed = time.perf_counter() - t0
     return body, elapsed
 
@@ -246,6 +250,10 @@ def run_suite(base_url: str, out_dir: str, steps: int = 25) -> list[dict]:
     w_u, h_u = save_b64_image(up_resp["image_base64"], os.path.join(out_dir, "09_upscale_fullhd.png"))
     print(f"    -> [OK] /upscale: {w_u}x{h_u}px en {t_up:.2f}s")
     results.append({"test": "8b. /upscale (FSRCNN Full HD)", "status": "OK", "seconds": round(t_up, 2), "size": f"{w_u}x{h_u}"})
+
+    report_path = os.path.join(out_dir, "report.json")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump({"status": "completed", "results": results}, f, indent=2, ensure_ascii=False)
 
     print("\n=== RESUMEN DE PRUEBAS E2E ===")
     for r in results:

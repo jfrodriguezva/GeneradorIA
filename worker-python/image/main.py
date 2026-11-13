@@ -1,11 +1,18 @@
 import base64
 import io
+import json
 import os
 import threading
+import traceback
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+# PyTorch 2.6+ cambió el default de torch.load a weights_only=True, lo que rompe
+# checkpoints de gfpgan/facexlib/controlnet_aux.
+os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from faceswap import FaceSwapRequest, swap_faces, restore_faces_in_image
@@ -527,9 +534,42 @@ class ReferenceGenerateRequest(BaseModel):
     restore_faces: bool = False
 
 
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    tb = traceback.format_exc()
+    print(f"[image-worker] ERROR no manejado en {request.url.path}:\n{tb}", flush=True)
+    return JSONResponse(status_code=500, content={"detail": str(exc), "traceback": tb})
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "model_loaded": _pipe is not None, "device": DEVICE}
+
+
+@app.get("/e2e-status")
+def e2e_status():
+    """Devuelve el último reporte de pruebas E2E (si existe) y las últimas líneas del log."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    report_path = os.path.join(repo_root, "test_outputs", "report.json")
+    report = None
+    if os.path.isfile(report_path):
+        try:
+            with open(report_path, encoding="utf-8") as f:
+                report = json.load(f)
+        except Exception as exc:
+            report = {"error_reading_report": str(exc)}
+
+    log_tail = ""
+    for candidate in ("/content/image_worker.log", os.path.join(repo_root, "image_worker.log")):
+        if os.path.isfile(candidate):
+            try:
+                with open(candidate, encoding="utf-8", errors="replace") as f:
+                    log_tail = f.read()[-4000:]
+                break
+            except Exception:
+                pass
+
+    return {"status": "ok", "device": DEVICE, "model_loaded": _pipe is not None, "report": report, "log_tail": log_tail}
 
 
 @app.post("/generate")

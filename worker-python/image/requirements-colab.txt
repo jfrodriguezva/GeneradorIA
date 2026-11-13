@@ -1,13 +1,13 @@
 # Dependencias para correr el worker de imágenes en Google Colab (GPU CUDA).
-# Nota: en Colab `torch` y `torchvision` con soporte CUDA ya vienen preinstalados,
-# y en modo GENERATIVA_IMAGE_DEVICE=CUDA no hace falta compilar/instalar OpenVINO ni NNCF.
+# En Colab `torch`, `torchvision`, `diffusers`, `transformers` y `accelerate` con CUDA
+# ya vienen preinstalados; no fijamos versiones viejas para no romper el entorno de Colab.
 
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-pydantic==2.9.2
-pillow>=10.4.0
-diffusers==0.30.3
-transformers==4.44.2
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.7.0
+pillow>=10.0.0
+diffusers>=0.30.0
+transformers>=4.44.0
 accelerate>=0.33.0
 huggingface_hub>=0.24.0
 
@@ -16,12 +16,5 @@ insightface
 onnxruntime-gpu
 opencv-contrib-python-headless
 
-# Restauración facial (GFPGAN)
-gfpgan
-basicsr
-facexlib
-
 # Preprocesadores de ControlNet (OpenPose / Canny)
-# Nota: tras instalar este archivo, reinstalar opencv-contrib-python-headless con:
-#   pip install --force-reinstall --no-deps opencv-contrib-python-headless
 controlnet_aux
