@@ -239,4 +239,18 @@ public class ImageController : ControllerBase
 
         return await ForwardToWorkerAsync(client, "/upscale", payload, cancellationToken);
     }
+
+    [HttpPost("generate-video")]
+    public async Task<IActionResult> GenerateVideo([FromBody] JsonElement request, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient("ImageWorker");
+        return await ForwardToWorkerAsync(client, "/generate-video", request, cancellationToken);
+    }
+
+    [HttpPost("tts")]
+    public async Task<IActionResult> SynthesizeTts([FromBody] JsonElement request, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient("ImageWorker");
+        return await ForwardToWorkerAsync(client, "/tts", request, cancellationToken);
+    }
 }

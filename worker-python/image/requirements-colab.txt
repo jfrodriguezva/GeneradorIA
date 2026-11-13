@@ -18,3 +18,7 @@ opencv-contrib-python-headless
 
 # Preprocesadores de ControlNet (OpenPose / Canny)
 controlnet_aux
+
+# Narración neuronal en español (es-MX) y ensamblaje de video/cortometrajes (PrayVis)
+edge-tts
+

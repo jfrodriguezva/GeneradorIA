@@ -19,6 +19,7 @@ from faceswap import FaceSwapRequest, swap_faces, restore_faces_in_image
 from upscale import upscale_to_fullhd
 import segmentation
 import controlnet as controlnet_mod
+import video as video_mod
 
 # Modelo de alta calidad (no-turbo) para fotorrealismo, incluye personas.
 # Requiere más pasos de inferencia (mucho más lento que SD-Turbo) pero da resultados
@@ -874,6 +875,88 @@ def upscale(req: UpscaleRequest):
     image_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     return {"image_base64": image_base64, "format": "png", "width": result_image.width, "height": result_image.height}
+
+
+@app.post("/tts")
+async def synthesize_tts_endpoint(req: video_mod.TTSRequest):
+    """Sintetiza voz neuronal en español de México (es-MX) para narrador o personaje."""
+    import tempfile
+
+    voice, rate, pitch = video_mod.parametros_voz_personaje(req.speaker)
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        await video_mod._edge_tts_to_file(req.text, tmp_path, voice, rate, pitch)
+        with open(tmp_path, "rb") as f:
+            audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+        return {"audio_base64": audio_b64, "format": "mp3", "voice": voice, "rate": rate, "pitch": pitch}
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+@app.post("/generate-video")
+def generate_video_endpoint(req: video_mod.VideoGenerateRequest):
+    """Genera un cortometraje MP4 (H.264 + AAC) para una serie de PrayVis / Generativa.
+    Si alguna escena no incluye `image_base64`, genera su keyframe 16:9 en GPU con Stable Diffusion."""
+    import tempfile
+    from PIL import Image
+
+    if _pipe is None:
+        raise HTTPException(status_code=503, detail="Pipeline no inicializado")
+
+    scenes_data = []
+    for idx, sc in enumerate(req.scenes):
+        if sc.image_base64:
+            raw = base64.b64decode(sc.image_base64)
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
+        else:
+            prompt_txt = (sc.prompt or sc.heading) + QUALITY_SUFFIX
+            seed_val = (req.seed or 42) + idx * 17
+            generator = _make_generator(seed_val)
+            with _inference_lock:
+                res = _pipe(
+                    prompt=prompt_txt,
+                    negative_prompt=DEFAULT_NEGATIVE_PROMPT,
+                    width=768,
+                    height=432,
+                    num_inference_steps=24,
+                    guidance_scale=7.0,
+                    generator=generator,
+                )
+                img = res.images[0]
+
+        scenes_data.append(
+            {
+                "heading": sc.heading,
+                "image": img,
+                "lines": [line.model_dump() for line in sc.lines],
+            }
+        )
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        out_mp4 = tmp.name
+
+    try:
+        meta = video_mod.render_cortometraje_mp4(
+            series_slug=req.series_slug,
+            episode_title=req.episode_title,
+            scenes_data=scenes_data,
+            output_mp4_path=out_mp4,
+            width=req.width,
+            height=req.height,
+            fps=req.fps,
+        )
+        with open(out_mp4, "rb") as f:
+            video_b64 = base64.b64encode(f.read()).decode("utf-8")
+        return {
+            "video_base64": video_b64,
+            "format": "mp4",
+            **{k: v for k, v in meta.items() if k != "output_path"},
+        }
+    finally:
+        if os.path.exists(out_mp4):
+            os.remove(out_mp4)
 
 
 if __name__ == "__main__":
