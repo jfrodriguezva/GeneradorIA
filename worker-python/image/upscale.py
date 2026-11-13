@@ -33,8 +33,17 @@ def _load_upscaler():
 def upscale_to_fullhd(image: Image.Image, target_long_side: int = 1920) -> Image.Image:
     """Escala x4 con FSRCNN y luego ajusta al tamaño objetivo (por defecto, que el
     lado largo llegue a 1920px, es decir, calidad Full HD) preservando la relación
-    de aspecto original."""
-    sr = _load_upscaler()
+    de aspecto original. Si el archivo FSRCNN_x4.pb no está disponible, aplica un
+    escalado Lanczos como fallback para no abortar la generación."""
+    try:
+        sr = _load_upscaler()
+    except FileNotFoundError as exc:
+        print(f"[upscale] Aviso: {exc}. Usando resize Lanczos como fallback.")
+        width, height = image.size
+        scale = target_long_side / max(width, height)
+        new_width = max(1, int(round(width * scale)))
+        new_height = max(1, int(round(height * scale)))
+        return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
     bgr = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
     upscaled_bgr = sr.upsample(bgr)

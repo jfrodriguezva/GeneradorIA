@@ -52,15 +52,19 @@ def _load_models():
             "Descárgalo antes de usar esta función.",
         )
 
+    import onnxruntime as ort
     from insightface.app import FaceAnalysis
     from insightface.model_zoo import get_model
 
-    print(f"[faceswap] Cargando modelo de análisis de rostro (buffalo_l) desde {FACESWAP_MODELS_ROOT}...")
-    analyser = FaceAnalysis(name="buffalo_l", root=FACESWAP_MODELS_ROOT, providers=["CPUExecutionProvider"])
+    available = ort.get_available_providers()
+    providers = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in available] or ["CPUExecutionProvider"]
+
+    print(f"[faceswap] Cargando modelo de análisis de rostro (buffalo_l) desde {FACESWAP_MODELS_ROOT} (providers={providers})...")
+    analyser = FaceAnalysis(name="buffalo_l", root=FACESWAP_MODELS_ROOT, providers=providers)
     analyser.prepare(ctx_id=0, det_size=(640, 640))
 
     print(f"[faceswap] Cargando modelo de intercambio desde {MODEL_PATH}...")
-    swapper = get_model(MODEL_PATH, providers=["CPUExecutionProvider"])
+    swapper = get_model(MODEL_PATH, providers=providers)
 
     _face_analyser = analyser
     _face_swapper = swapper

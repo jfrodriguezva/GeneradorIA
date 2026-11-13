@@ -133,6 +133,21 @@ dotnet run
 (El host WPF hace health-check de los 4 servicios al arrancar y los lanza solo si no están ya
 corriendo, así que también puedes saltarte `start-dev.ps1` y simplemente correr esto.)
 
+## Cómo probar o acelerar en Google Colab (GPU T4 gratuita)
+
+Si quieres validar de punta a punta todos los endpoints en segundos (o usar la GPU NVIDIA T4 de Google Colab como motor remoto desde tu frontend local):
+
+1. Abre el notebook [`colab/Generativa_Colab_GPU.ipynb`](./colab/Generativa_Colab_GPU.ipynb) en Google Colab con entorno **T4 GPU**.
+2. Ejecuta las celdas en orden para:
+   - Instalar dependencias (`worker-python/image/requirements-colab.txt`) y descargar automáticamente `inswapper_128.onnx`, `GFPGANv1.4.pth` y `FSRCNN_x4.pb` (`download_models.py`).
+   - Levantar el worker con `GENERATIVA_IMAGE_DEVICE=CUDA` (PyTorch `float16`).
+   - Correr la suite completa de pruebas E2E (`worker-python/image/test_e2e_endpoints.py`: `/generate`, `/edit`, `/inpaint`, `/generate-controlled`, `/generate-with-reference`, `/faceswap`, `/upscale`) y visualizar la galería en el notebook.
+3. Para conectar tu app local en Windows al worker corriendo en Colab, ejecuta la última celda del notebook (que abre un túnel HTTPS gratuito con `cloudflared`) y corre en tu PC:
+
+```powershell
+powershell -File start-dev-colab.ps1 -ColabUrl "https://xxxx.trycloudflare.com"
+```
+
 ## Puertos usados
 
 | Servicio | Puerto |
