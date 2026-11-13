@@ -261,10 +261,11 @@ def _load_ipadapter_pipeline():
     print(f"[image-worker] Cargando pipeline IP-Adapter (torch {target_device})...")
     pipe = StableDiffusionPipeline.from_pretrained(
         MODEL_ID, torch_dtype=dtype, safety_checker=None
-    ).to(target_device)
+    )
     pipe.load_ip_adapter(
         "h94/IP-Adapter", subfolder="models", weight_name="ip-adapter-full-face_sd15.bin"
     )
+    pipe = pipe.to(target_device)
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(
         pipe.scheduler.config,
         algorithm_type="dpmsolver++",

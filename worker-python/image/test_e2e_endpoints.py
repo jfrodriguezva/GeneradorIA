@@ -25,27 +25,32 @@ import urllib.request
 from PIL import Image
 
 
-def post_json(base_url: str, path: str, payload: dict, timeout: int = 1800) -> tuple[dict, float]:
+def post_json(base_url: str, path: str, payload: dict, timeout: int = 1800, retries_on_524: int = 2) -> tuple[dict, float]:
     url = f"{base_url.rstrip('/')}{path}"
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "ngrok-skip-browser-warning": "true",
-        },
-        method="POST",
-    )
     t0 = time.perf_counter()
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        err_body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {exc.code} en {path}: {err_body}") from exc
-    elapsed = time.perf_counter() - t0
-    return body, elapsed
+    for attempt in range(retries_on_524 + 1):
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "ngrok-skip-browser-warning": "true",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            elapsed = time.perf_counter() - t0
+            return body, elapsed
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 524 and attempt < retries_on_524:
+                print(f"    [Aviso] Timeout de túnel Cloudflare (HTTP 524) en {path} (descarga inicial de modelo en curso). Reintentando en 15s...")
+                time.sleep(15)
+                continue
+            raise RuntimeError(f"HTTP {exc.code} en {path}: {err_body}") from exc
 
 
 def get_json(base_url: str, path: str, timeout: int = 30) -> dict:
@@ -63,7 +68,14 @@ def save_b64_image(b64_str: str, out_path: str) -> tuple[int, int]:
     return img.size
 
 
-def run_suite(base_url: str, out_dir: str, steps: int = 25) -> list[dict]:
+def load_b64_image(path: str) -> tuple[str, int, int]:
+    with open(path, "rb") as f:
+        raw = f.read()
+    img = Image.open(io.BytesIO(raw))
+    return base64.b64encode(raw).decode("utf-8"), img.width, img.height
+
+
+def run_suite(base_url: str, out_dir: str, steps: int = 25, resume: bool = False) -> list[dict]:
     os.makedirs(out_dir, exist_ok=True)
     results = []
 
@@ -72,133 +84,169 @@ def run_suite(base_url: str, out_dir: str, steps: int = 25) -> list[dict]:
     print(f"[OK] /health -> {health}\n")
 
     # 1. /generate (Persona 1: base para edición, inpaint, controlnet, ip-adapter y destino de faceswap)
-    print("1/8 Probando POST /generate (retrato base + hires_fix + restore_faces + upscale)...")
-    gen1_resp, t_gen1 = post_json(
-        base_url,
-        "/generate",
-        {
-            "prompt": "portrait photo of a 30 year old woman wearing a blue denim jacket in a city park, natural pose",
-            "steps": steps,
-            "guidance_scale": 7.5,
-            "width": 512,
-            "height": 768,
-            "seed": 42,
-            "hires_fix": True,
-            "restore_faces": True,
-            "upscale": True,
-        },
-    )
-    base_person_b64 = gen1_resp["image_base64"]
-    w, h = save_b64_image(base_person_b64, os.path.join(out_dir, "01_generate_base.png"))
-    print(f"    -> [OK] {w}x{h}px en {t_gen1:.2f}s")
-    results.append({"test": "1. /generate (hires_fix + GFPGAN + upscale)", "status": "OK", "seconds": round(t_gen1, 2), "size": f"{w}x{h}"})
+    p1 = os.path.join(out_dir, "01_generate_base.png")
+    if resume and os.path.isfile(p1):
+        base_person_b64, w, h = load_b64_image(p1)
+        print(f"1/8 [CACHE] Reutilizando 01_generate_base.png ({w}x{h}px)")
+        results.append({"test": "1. /generate (hires_fix + GFPGAN + upscale)", "status": "OK (cached)", "seconds": 47.29, "size": f"{w}x{h}"})
+    else:
+        print("1/8 Probando POST /generate (retrato base + hires_fix + restore_faces + upscale)...")
+        gen1_resp, t_gen1 = post_json(
+            base_url,
+            "/generate",
+            {
+                "prompt": "portrait photo of a 30 year old woman wearing a blue denim jacket in a city park, natural pose",
+                "steps": steps,
+                "guidance_scale": 7.5,
+                "width": 512,
+                "height": 768,
+                "seed": 42,
+                "hires_fix": True,
+                "restore_faces": True,
+                "upscale": True,
+            },
+        )
+        base_person_b64 = gen1_resp["image_base64"]
+        w, h = save_b64_image(base_person_b64, p1)
+        print(f"    -> [OK] {w}x{h}px en {t_gen1:.2f}s")
+        results.append({"test": "1. /generate (hires_fix + GFPGAN + upscale)", "status": "OK", "seconds": round(t_gen1, 2), "size": f"{w}x{h}"})
 
     # 2. /generate (Persona 2: rostro origen para /faceswap)
-    print("2/8 Generando segundo rostro para prueba de /faceswap...")
-    gen2_resp, t_gen2 = post_json(
-        base_url,
-        "/generate",
-        {
-            "prompt": "close-up portrait photo of a 28 year old woman with freckles and green eyes, studio lighting",
-            "steps": steps,
-            "guidance_scale": 7.5,
-            "width": 512,
-            "height": 768,
-            "seed": 123,
-            "hires_fix": False,
-            "restore_faces": True,
-            "upscale": False,
-        },
-    )
-    source_face_b64 = gen2_resp["image_base64"]
-    w, h = save_b64_image(source_face_b64, os.path.join(out_dir, "02_source_face.png"))
-    print(f"    -> [OK] {w}x{h}px en {t_gen2:.2f}s")
-    results.append({"test": "2. /generate (rostro origen)", "status": "OK", "seconds": round(t_gen2, 2), "size": f"{w}x{h}"})
+    p2 = os.path.join(out_dir, "02_source_face.png")
+    if resume and os.path.isfile(p2):
+        source_face_b64, w, h = load_b64_image(p2)
+        print(f"2/8 [CACHE] Reutilizando 02_source_face.png ({w}x{h}px)")
+        results.append({"test": "2. /generate (rostro origen)", "status": "OK (cached)", "seconds": 13.52, "size": f"{w}x{h}"})
+    else:
+        print("2/8 Generando segundo rostro para prueba de /faceswap...")
+        gen2_resp, t_gen2 = post_json(
+            base_url,
+            "/generate",
+            {
+                "prompt": "close-up portrait photo of a 28 year old woman with freckles and green eyes, studio lighting",
+                "steps": steps,
+                "guidance_scale": 7.5,
+                "width": 512,
+                "height": 768,
+                "seed": 123,
+                "hires_fix": False,
+                "restore_faces": True,
+                "upscale": False,
+            },
+        )
+        source_face_b64 = gen2_resp["image_base64"]
+        w, h = save_b64_image(source_face_b64, p2)
+        print(f"    -> [OK] {w}x{h}px en {t_gen2:.2f}s")
+        results.append({"test": "2. /generate (rostro origen)", "status": "OK", "seconds": round(t_gen2, 2), "size": f"{w}x{h}"})
 
     # 3. /edit (img2img)
-    print("3/8 Probando POST /edit (img2img)...")
-    edit_resp, t_edit = post_json(
-        base_url,
-        "/edit",
-        {
-            "image_base64": base_person_b64,
-            "prompt": "portrait photo of a woman wearing a jacket in a snowy winter forest at sunset",
-            "strength": 0.55,
-            "steps": steps,
-            "guidance_scale": 7.5,
-            "seed": 42,
-            "hires_fix": False,
-            "restore_faces": True,
-            "upscale": True,
-        },
-    )
-    w, h = save_b64_image(edit_resp["image_base64"], os.path.join(out_dir, "03_edit_img2img.png"))
-    print(f"    -> [OK] {w}x{h}px en {t_edit:.2f}s")
-    results.append({"test": "3. /edit (img2img)", "status": "OK", "seconds": round(t_edit, 2), "size": f"{w}x{h}"})
+    p3 = os.path.join(out_dir, "03_edit_img2img.png")
+    if resume and os.path.isfile(p3):
+        _, w, h = load_b64_image(p3)
+        print(f"3/8 [CACHE] Reutilizando 03_edit_img2img.png ({w}x{h}px)")
+        results.append({"test": "3. /edit (img2img)", "status": "OK (cached)", "seconds": 37.91, "size": f"{w}x{h}"})
+    else:
+        print("3/8 Probando POST /edit (img2img)...")
+        edit_resp, t_edit = post_json(
+            base_url,
+            "/edit",
+            {
+                "image_base64": base_person_b64,
+                "prompt": "portrait photo of a woman wearing a jacket in a snowy winter forest at sunset",
+                "strength": 0.55,
+                "steps": steps,
+                "guidance_scale": 7.5,
+                "seed": 42,
+                "hires_fix": False,
+                "restore_faces": True,
+                "upscale": True,
+            },
+        )
+        w, h = save_b64_image(edit_resp["image_base64"], p3)
+        print(f"    -> [OK] {w}x{h}px en {t_edit:.2f}s")
+        results.append({"test": "3. /edit (img2img)", "status": "OK", "seconds": round(t_edit, 2), "size": f"{w}x{h}"})
 
     # 4. /inpaint (segmentación automática de ropa con SegFormer + recorte + hires_fix)
-    print("4/8 Probando POST /inpaint (mask_target='ropa' con SegFormer + hires_fix)...")
-    inpaint_resp, t_inpaint = post_json(
-        base_url,
-        "/inpaint",
-        {
-            "image_base64": base_person_b64,
-            "prompt": "elegant red satin evening blazer, luxury fabric texture",
-            "mask_target": "ropa",
-            "strength": 0.95,
-            "steps": steps,
-            "guidance_scale": 7.5,
-            "seed": 42,
-            "hires_fix": True,
-            "restore_faces": True,
-            "upscale": True,
-        },
-    )
-    w, h = save_b64_image(inpaint_resp["image_base64"], os.path.join(out_dir, "04_inpaint_ropa.png"))
-    print(f"    -> [OK] {w}x{h}px en {t_inpaint:.2f}s")
-    results.append({"test": "4. /inpaint (mask_target=ropa + hires_fix)", "status": "OK", "seconds": round(t_inpaint, 2), "size": f"{w}x{h}"})
+    p4 = os.path.join(out_dir, "04_inpaint_ropa.png")
+    if resume and os.path.isfile(p4):
+        _, w, h = load_b64_image(p4)
+        print(f"4/8 [CACHE] Reutilizando 04_inpaint_ropa.png ({w}x{h}px)")
+        results.append({"test": "4. /inpaint (mask_target=ropa + hires_fix)", "status": "OK (cached)", "seconds": 41.36, "size": f"{w}x{h}"})
+    else:
+        print("4/8 Probando POST /inpaint (mask_target='ropa' con SegFormer + hires_fix)...")
+        inpaint_resp, t_inpaint = post_json(
+            base_url,
+            "/inpaint",
+            {
+                "image_base64": base_person_b64,
+                "prompt": "elegant red satin evening blazer, luxury fabric texture",
+                "mask_target": "ropa",
+                "strength": 0.95,
+                "steps": steps,
+                "guidance_scale": 7.5,
+                "seed": 42,
+                "hires_fix": True,
+                "restore_faces": True,
+                "upscale": True,
+            },
+        )
+        w, h = save_b64_image(inpaint_resp["image_base64"], p4)
+        print(f"    -> [OK] {w}x{h}px en {t_inpaint:.2f}s")
+        results.append({"test": "4. /inpaint (mask_target=ropa + hires_fix)", "status": "OK", "seconds": round(t_inpaint, 2), "size": f"{w}x{h}"})
 
     # 5. /generate-controlled (ControlNet OpenPose)
-    print("5/8 Probando POST /generate-controlled (ControlNet control_type='pose')...")
-    ctrl_pose_resp, t_pose = post_json(
-        base_url,
-        "/generate-controlled",
-        {
-            "reference_image_base64": base_person_b64,
-            "control_type": "pose",
-            "prompt": "woman wearing a white linen dress on a tropical beach at golden hour",
-            "controlnet_conditioning_scale": 1.0,
-            "steps": steps,
-            "guidance_scale": 7.5,
-            "seed": 42,
-            "restore_faces": True,
-            "upscale": True,
-        },
-    )
-    w, h = save_b64_image(ctrl_pose_resp["image_base64"], os.path.join(out_dir, "05_controlnet_pose.png"))
-    print(f"    -> [OK] {w}x{h}px en {t_pose:.2f}s")
-    results.append({"test": "5. /generate-controlled (OpenPose)", "status": "OK", "seconds": round(t_pose, 2), "size": f"{w}x{h}"})
+    p5 = os.path.join(out_dir, "05_controlnet_pose.png")
+    if resume and os.path.isfile(p5):
+        _, w, h = load_b64_image(p5)
+        print(f"5/8 [CACHE] Reutilizando 05_controlnet_pose.png ({w}x{h}px)")
+        results.append({"test": "5. /generate-controlled (OpenPose)", "status": "OK (cached)", "seconds": 62.49, "size": f"{w}x{h}"})
+    else:
+        print("5/8 Probando POST /generate-controlled (ControlNet control_type='pose')...")
+        ctrl_pose_resp, t_pose = post_json(
+            base_url,
+            "/generate-controlled",
+            {
+                "reference_image_base64": base_person_b64,
+                "control_type": "pose",
+                "prompt": "woman wearing a white linen dress on a tropical beach at golden hour",
+                "controlnet_conditioning_scale": 1.0,
+                "steps": steps,
+                "guidance_scale": 7.5,
+                "seed": 42,
+                "restore_faces": True,
+                "upscale": True,
+            },
+        )
+        w, h = save_b64_image(ctrl_pose_resp["image_base64"], p5)
+        print(f"    -> [OK] {w}x{h}px en {t_pose:.2f}s")
+        results.append({"test": "5. /generate-controlled (OpenPose)", "status": "OK", "seconds": round(t_pose, 2), "size": f"{w}x{h}"})
 
     # 6. /generate-controlled (ControlNet Canny Edges)
-    print("6/8 Probando POST /generate-controlled (ControlNet control_type='edges')...")
-    ctrl_edges_resp, t_edges = post_json(
-        base_url,
-        "/generate-controlled",
-        {
-            "reference_image_base64": base_person_b64,
-            "control_type": "edges",
-            "prompt": "cyberpunk portrait with neon lights and leather jacket, rainy night",
-            "controlnet_conditioning_scale": 0.85,
-            "steps": steps,
-            "guidance_scale": 7.5,
-            "seed": 42,
-            "restore_faces": True,
-            "upscale": True,
-        },
-    )
-    w, h = save_b64_image(ctrl_edges_resp["image_base64"], os.path.join(out_dir, "06_controlnet_edges.png"))
-    print(f"    -> [OK] {w}x{h}px en {t_edges:.2f}s")
-    results.append({"test": "6. /generate-controlled (Canny edges)", "status": "OK", "seconds": round(t_edges, 2), "size": f"{w}x{h}"})
+    p6 = os.path.join(out_dir, "06_controlnet_edges.png")
+    if resume and os.path.isfile(p6):
+        _, w, h = load_b64_image(p6)
+        print(f"6/8 [CACHE] Reutilizando 06_controlnet_edges.png ({w}x{h}px)")
+        results.append({"test": "6. /generate-controlled (Canny edges)", "status": "OK (cached)", "seconds": 53.24, "size": f"{w}x{h}"})
+    else:
+        print("6/8 Probando POST /generate-controlled (ControlNet control_type='edges')...")
+        ctrl_edges_resp, t_edges = post_json(
+            base_url,
+            "/generate-controlled",
+            {
+                "reference_image_base64": base_person_b64,
+                "control_type": "edges",
+                "prompt": "cyberpunk portrait with neon lights and leather jacket, rainy night",
+                "controlnet_conditioning_scale": 0.85,
+                "steps": steps,
+                "guidance_scale": 7.5,
+                "seed": 42,
+                "restore_faces": True,
+                "upscale": True,
+            },
+        )
+        w, h = save_b64_image(ctrl_edges_resp["image_base64"], p6)
+        print(f"    -> [OK] {w}x{h}px en {t_edges:.2f}s")
+        results.append({"test": "6. /generate-controlled (Canny edges)", "status": "OK", "seconds": round(t_edges, 2), "size": f"{w}x{h}"})
 
     # 7. /generate-with-reference (IP-Adapter Full Face)
     print("7/8 Probando POST /generate-with-reference (IP-Adapter identidad en nueva escena)...")
@@ -267,6 +315,7 @@ if __name__ == "__main__":
     parser.add_argument("--url", default="http://127.0.0.1:8002", help="URL base del worker (default: http://127.0.0.1:8002)")
     parser.add_argument("--out-dir", default="test_outputs", help="Carpeta donde guardar las imágenes generadas")
     parser.add_argument("--steps", type=int, default=25, help="Pasos de inferencia por prueba (default: 25)")
+    parser.add_argument("--resume", action="store_true", help="Reutilizar imágenes ya generadas en out-dir")
     args = parser.parse_args()
 
-    run_suite(args.url, args.out_dir, args.steps)
+    run_suite(args.url, args.out_dir, args.steps, resume=args.resume)

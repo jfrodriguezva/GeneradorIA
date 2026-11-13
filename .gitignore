@@ -37,3 +37,6 @@ Thumbs.db
 
 # Estado local de Claude Code (no es parte del proyecto)
 .claude/
+
+# Salidas de pruebas E2E
+test_outputs/
